@@ -1,0 +1,59 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Dependencies and Build Outputs
+node_modules
+dist
+dist-ssr
+.output
+.vinxi
+.tanstack/**
+.nitro
+
+# Vite / React Caches
+.vite/
+.eslintcache
+
+# Local Development / Secrets
+*.local
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Supabase Local Development Caches
+supabase/
+
+# Local data
+data/
+
+# Wrangler / Cloudflare
+.wrangler/
+.dev.vars
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Testing Frameworks (Vitest / Playwright / Cypress)
+/coverage
+/.nyc_output
+.playwright/
+cypress/videos/
+cypress/screenshots/
+
+# TypeScript Caches
+*.tsbuildinfo
