@@ -45,6 +45,7 @@ function TicketPage() {
 
   const [items, setItems] = useState<DraftItem[]>([]);
   const [busy, setBusy] = useState(false);
+  const [editingCancelled, setEditingCancelled] = useState(false);
 
   // Hydrate draft from current submission
   useEffect(() => {
@@ -69,16 +70,40 @@ function TicketPage() {
     );
   }, [submissionQ.data, materialsQ.data]);
 
-  const locked = submissionQ.data?.status === "verified";
+  const sub = submissionQ.data;
+  const locked = sub?.status === "verified";
+  const isCancelled = sub?.status === "cancelled";
+  // Editing is allowed when no submission, when cancelled (after user opts in), or when editable status
+  const canEdit =
+    !locked &&
+    (!sub || editingCancelled || !["cancelled"].includes(sub.status) || editingCancelled);
+  const editable = !locked && (!isCancelled || editingCancelled);
+
   const total = useMemo(() => items.reduce((s, i) => s + i.quantity * i.unitPrice, 0), [items]);
   const invalid = items.some((i) => !i.name.trim() || i.quantity < 1 || i.unitPrice < 0);
 
   function addItem(it: DraftItem) {
+    if (!editable) {
+      toast.error("A cancelled submission already exists. Edit or resubmit it.");
+      return;
+    }
     setItems((prev) => {
       if (it.materialId) {
         const existing = prev.find((p) => p.materialId === it.materialId && !p.isCustom);
         if (existing) {
+          toast.success("Quantity updated.");
           return prev.map((p) => (p === existing ? { ...p, quantity: p.quantity + 1 } : p));
+        }
+      } else if (it.isCustom) {
+        const key = it.name.trim().toLowerCase();
+        const existing = prev.find(
+          (p) => p.isCustom && p.name.trim().toLowerCase() === key,
+        );
+        if (existing) {
+          toast.success("Quantity updated.");
+          return prev.map((p) =>
+            p === existing ? { ...p, quantity: p.quantity + it.quantity } : p,
+          );
         }
       }
       return [...prev, it];
@@ -91,13 +116,13 @@ function TicketPage() {
     setItems((prev) => prev.filter((p) => p.key !== key));
   }
 
-  async function onSubmit() {
-    if (items.length === 0 || invalid || locked) return;
+  async function doSubmit(itemsToSend: DraftItem[]) {
+    const wasNew = !sub;
     setBusy(true);
     try {
       await submitItems(
         ticketId,
-        items.map((i) => ({
+        itemsToSend.map((i) => ({
           materialId: i.materialId ?? null,
           name: i.name,
           quantity: i.quantity,
@@ -105,20 +130,38 @@ function TicketPage() {
           isCustom: i.isCustom,
         })),
       );
-      toast.success("Submission saved");
+      toast.success(wasNew ? "Submission saved." : "Submission updated.");
+      setEditingCancelled(false);
       await qc.invalidateQueries({ queryKey: ["submission", ticketId] });
     } catch (err: any) {
-      toast.error(err.message ?? "Failed to save submission");
+      const msg = err?.message ?? "Failed to save submission";
+      if (/verified/i.test(msg)) {
+        toast.error("This submission has been verified and cannot be changed.");
+      } else if (/out of stock/i.test(msg)) {
+        toast.error("This material is out of stock.");
+      } else {
+        toast.error(msg);
+      }
     } finally {
       setBusy(false);
     }
+  }
+
+  async function onSubmit() {
+    if (items.length === 0 || invalid || locked) return;
+    await doSubmit(items);
+  }
+
+  async function onResubmit() {
+    if (!sub || items.length === 0) return;
+    await doSubmit(items);
   }
 
   async function onCancel() {
     setBusy(true);
     try {
       await cancelSubmission(ticketId);
-      toast.success("Submission cancelled");
+      toast.success("Submission cancelled.");
       await qc.invalidateQueries({ queryKey: ["submission", ticketId] });
     } catch (err: any) {
       toast.error(err.message ?? "Failed to cancel");
@@ -131,7 +174,7 @@ function TicketPage() {
     setBusy(true);
     try {
       await undoSubmission(ticketId);
-      toast.success("Restored previous version");
+      toast.success("Last edit undone.");
       await qc.invalidateQueries({ queryKey: ["submission", ticketId] });
     } catch (err: any) {
       toast.error(err.message ?? "Failed to undo");
@@ -164,8 +207,14 @@ function TicketPage() {
     );
   }
 
+  const submitDisabled = busy || items.length === 0 || invalid || locked || (isCancelled && !editingCancelled);
+  const submitTooltip =
+    isCancelled && !editingCancelled
+      ? "A cancelled submission already exists. Edit or resubmit it."
+      : undefined;
+
   return (
-    <div className="mx-auto max-w-4xl space-y-4 p-4 lg:p-8">
+    <div className="mx-auto max-w-4xl space-y-6 p-4 pb-32 lg:p-8 lg:pb-32">
       <Link
         to="/"
         className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground"
@@ -173,56 +222,99 @@ function TicketPage() {
         <ArrowLeft className="mr-1 h-4 w-4" /> Lookup another ticket
       </Link>
 
-      <TicketHeader ticket={ticketQ.data} />
+      <section className="space-y-2">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+          Ticket info
+        </h2>
+        <TicketHeader ticket={ticketQ.data} />
+      </section>
 
-      {submissionQ.data && (
-        <SubmissionStatusBar
-          submission={submissionQ.data}
-          onCancel={onCancel}
-          onUndo={onUndo}
-          busy={busy}
-        />
+      {sub && (
+        <section className="space-y-2">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+            Existing submission
+          </h2>
+          <SubmissionStatusBar
+            submission={sub}
+            onCancel={onCancel}
+            onUndo={onUndo}
+            onEdit={() => setEditingCancelled(true)}
+            onResubmit={onResubmit}
+            busy={busy}
+          />
+        </section>
       )}
 
-      {!locked && category && (
-        <>
+      {editable && category && (
+        <section className="space-y-2">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+            Material selection
+          </h2>
           {materialsQ.isLoading ? (
             <Skeleton className="h-48 w-full" />
           ) : (
-            <MaterialSelector materials={materialsQ.data ?? []} onAdd={addItem} />
+            <MaterialSelector
+              materials={materialsQ.data ?? []}
+              category={ticketQ.data.request_category ?? undefined}
+              onAdd={addItem}
+            />
           )}
-        </>
+        </section>
       )}
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Line items</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <LineItemsTable
-            items={items}
-            onUpdate={updateItem}
-            onRemove={removeItem}
-            readOnly={locked}
-          />
-          <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
-            <div>
-              <div className="text-xs uppercase tracking-wide text-muted-foreground">Total</div>
-              <div className="text-2xl font-semibold">{formatCurrency(total)}</div>
+      <section className="space-y-2">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+          Line items
+        </h2>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Items</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <LineItemsTable
+              items={items}
+              onUpdate={updateItem}
+              onRemove={removeItem}
+              readOnly={!editable}
+            />
+          </CardContent>
+        </Card>
+      </section>
+
+      {/* Sticky summary & submit footer */}
+      {items.length > 0 && !locked && (
+        <div className="fixed inset-x-0 bottom-0 z-20 border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+          <div className="mx-auto flex max-w-4xl flex-wrap items-center justify-between gap-3 px-4 py-3 lg:px-8">
+            <div className="flex items-baseline gap-3">
+              <span className="text-sm text-muted-foreground">
+                {items.length} {items.length === 1 ? "item" : "items"}
+              </span>
+              <span className="text-xs text-muted-foreground">Total</span>
+              <span className="text-lg font-bold">{formatCurrency(total)}</span>
             </div>
-            {!locked && (
-              <Button onClick={onSubmit} disabled={busy || items.length === 0 || invalid} size="lg">
+            <div className="flex gap-2">
+              {sub && ["submitted", "failed"].includes(sub.status) && (
+                <Button variant="outline" onClick={onCancel} disabled={busy}>
+                  Cancel
+                </Button>
+              )}
+              <Button
+                onClick={onSubmit}
+                disabled={submitDisabled}
+                title={submitTooltip}
+                size="lg"
+              >
                 {busy ? (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 ) : (
                   <Send className="mr-2 h-4 w-4" />
                 )}
-                {submissionQ.data ? "Re-submit" : "Submit"}
+                {sub ? "Resubmit" : "Submit"}
               </Button>
-            )}
+            </div>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      )}
     </div>
   );
 }

@@ -30,9 +30,11 @@ const PAGE_SIZE = 10;
 
 export function MaterialSelector({
   materials,
+  category,
   onAdd,
 }: {
   materials: MaterialRow[];
+  category?: string;
   onAdd: (item: DraftItem) => void;
 }) {
   const [customOpen, setCustomOpen] = useState(false);
@@ -52,6 +54,15 @@ export function MaterialSelector({
   const hasNext = page < totalPages;
   const hasPrev = page > 1;
 
+  // Live suggestions inside the custom-item dialog
+  const suggestions = useMemo(() => {
+    const q = customName.trim().toLowerCase();
+    if (!q) return [];
+    return materials
+      .filter((m) => m.name.toLowerCase().includes(q))
+      .slice(0, 5);
+  }, [materials, customName]);
+
   function handleSearch(val: string) {
     setSearch(val);
     setPage(1);
@@ -70,12 +81,21 @@ export function MaterialSelector({
     });
   }
 
+  function pickSuggestion(m: MaterialRow) {
+    pick(m);
+    setCustomName("");
+    setCustomQty(1);
+    setCustomPrice(0);
+    setCustomOpen(false);
+  }
+
   function addCustom() {
-    if (!customName.trim() || customQty < 1 || customPrice < 0) return;
+    const name = customName.trim();
+    if (!name || customQty < 1 || customPrice < 0) return;
     onAdd({
       key: `c-${Date.now()}`,
       materialId: null,
-      name: customName.trim(),
+      name,
       quantity: customQty,
       unitPrice: customPrice,
       isCustom: true,
@@ -90,7 +110,7 @@ export function MaterialSelector({
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle className="text-base">Materials</CardTitle>
+        <CardTitle className="text-base">Material selection</CardTitle>
         <Dialog open={customOpen} onOpenChange={setCustomOpen}>
           <DialogTrigger asChild>
             <Button variant="outline" size="sm">
@@ -104,7 +124,49 @@ export function MaterialSelector({
             <div className="space-y-3">
               <div className="space-y-1">
                 <Label>Name</Label>
-                <Input value={customName} onChange={(e) => setCustomName(e.target.value)} />
+                <Input
+                  value={customName}
+                  onChange={(e) => setCustomName(e.target.value)}
+                  placeholder="Start typing to see suggestions"
+                />
+                {customName.trim() && (
+                  <div className="rounded-md border bg-muted/30 p-1 text-sm">
+                    {suggestions.length === 0 ? (
+                      <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                        No matches. This will be added as a custom item.
+                      </div>
+                    ) : (
+                      <ul className="divide-y">
+                        {suggestions.map((m) => (
+                          <li key={m.id}>
+                            <button
+                              type="button"
+                              onClick={() => pickSuggestion(m)}
+                              disabled={m.qty_available === 0}
+                              className="flex w-full items-center justify-between gap-2 rounded px-2 py-1.5 text-left hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              <div className="flex flex-col">
+                                <span className="font-medium">{m.name}</span>
+                                <span className="text-xs text-muted-foreground">
+                                  {category ?? "Catalog"}
+                                </span>
+                              </div>
+                              <span className="text-xs">
+                                {m.price === 0 ? (
+                                  <Badge variant="secondary" className="bg-orange-100 text-orange-700">
+                                    Price required
+                                  </Badge>
+                                ) : (
+                                  formatCurrency(m.price)
+                                )}
+                              </span>
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
@@ -136,7 +198,6 @@ export function MaterialSelector({
       </CardHeader>
 
       <CardContent className="space-y-4">
-        {/* Search */}
         <div className="relative">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -147,7 +208,6 @@ export function MaterialSelector({
           />
         </div>
 
-        {/* Grid */}
         {materials.length === 0 ? (
           <p className="text-sm text-muted-foreground">
             No materials in this category. Use a custom item instead.
@@ -190,7 +250,6 @@ export function MaterialSelector({
           </div>
         )}
 
-        {/* Pagination */}
         {totalPages > 1 && (
           <div className="flex items-center justify-between text-sm text-muted-foreground">
             <span>

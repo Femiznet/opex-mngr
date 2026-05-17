@@ -51,7 +51,7 @@ export function TicketLookup() {
               <Label htmlFor="ticketId">Ticket ID</Label>
               <Input
                 id="ticketId"
-                placeholder="e.g. T-001"
+                placeholder="Enter your ticket ID"
                 value={ticketId}
                 onChange={(e) => setTicketId(e.target.value)}
                 aria-invalid={!!error}
@@ -64,10 +64,6 @@ export function TicketLookup() {
               {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Continue
             </Button>
-            <p className="text-center text-xs text-muted-foreground">
-              Try <code className="rounded bg-slate-100 px-1 py-0.5">T-001</code> or{" "}
-              <code className="rounded bg-slate-100 px-1 py-0.5">T-002</code>
-            </p>
           </form>
         </CardContent>
       </Card>

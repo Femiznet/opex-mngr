@@ -26,7 +26,7 @@ export function LineItemsTable({
   if (items.length === 0) {
     return (
       <p className="rounded-md border border-dashed py-8 text-center text-sm text-muted-foreground">
-        No items yet. Pick a material or add a custom item.
+        No items added yet.
       </p>
     );
   }
