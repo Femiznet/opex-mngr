@@ -131,6 +131,7 @@ export async function submitItems(
   if (existing?.status === "verified") {
     throw new Error("Verified submissions cannot be modified");
   }
+  // cancelled is explicitly allowed to resubmit — the upsert will flip status back to 'submitted'
 
   const { data: upserted, error: upsertErr } = await supabase
     .from("submissions")
