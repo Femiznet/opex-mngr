@@ -1,8 +1,8 @@
 import { useState, useMemo, useEffect } from "react";
 import { useRoute, Link, useLocation } from "wouter";
 import { useTicket } from "@/hooks/use-tickets";
-import { useSubmission, useSubmissionItems, useSaveSubmission, SubmissionItem, Submission } from "@/hooks/use-submissions";
-import { useMaterials } from "@/hooks/use-materials";
+import { useSubmission, useSubmissionItems, useSaveSubmission, SubmissionItem } from "@/hooks/use-submissions";
+import { useMaterials, useCategories } from "@/hooks/use-materials";
 import { currentUser } from "@/lib/current-user";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Search, Plus, Minus, Trash2, ArrowLeft, Eye, UploadCloud, ImageIcon } from "lucide-react";
+import { Search, Plus, Minus, Trash2, ArrowLeft, Eye, UploadCloud, ImageIcon, X } from "lucide-react";
 import { toast } from "sonner";
 import { SubmissionStatusBadge } from "./tickets";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
@@ -26,6 +26,7 @@ export default function TicketWorkflow() {
   const { data: existingSubmission, isLoading: subLoading } = useSubmission(ticketId || "");
   const { data: existingItems } = useSubmissionItems(existingSubmission?.id);
   const { data: materials, isLoading: matLoading } = useMaterials();
+  const { data: categories } = useCategories();
   const saveMutation = useSaveSubmission();
 
   const [matSearch, setMatSearch] = useState("");
@@ -36,7 +37,7 @@ export default function TicketWorkflow() {
   const [uploadingImage, setUploadingImage] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
 
-  // Initialize state from existing submission
+  // Initialize state parameters from existing submission structures
   useEffect(() => {
     if (existingSubmission) {
       setContactEmail(existingSubmission.contact_email || currentUser.email);
@@ -57,15 +58,65 @@ export default function TicketWorkflow() {
     }
   }, [existingItems]);
 
+  // Unsaved Changes Navigation Guard Interceptor
+  useEffect(() => {
+    if (items.length === 0 || existingSubmission?.status === 'verified') return;
+
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [items.length, existingSubmission?.status]);
+
+  // Map string ticket request categories to raw numeric database category IDs
+  const currentTicketCategoryId = useMemo(() => {
+    const requestCategory = ticket?.request_category;
+    if (!categories || !requestCategory) return null;
+
+    const normalizedCategory = requestCategory.toLowerCase();
+    const found = categories.find((c: any) => c.name?.toLowerCase() === normalizedCategory);
+
+    return found ? Number(found.id) : null;
+  }, [categories, ticket?.request_category]);
+
   const filteredMaterials = useMemo(() => {
     if (!materials) return [];
-    if (!matSearch) return materials;
-    return materials.filter(m => m.name.toLowerCase().includes(matSearch.toLowerCase()));
-  }, [materials, matSearch]);
+    
+    const normalizedSearch = matSearch.toLowerCase();
+  
+    return materials.filter(m => {
+      // 1. Validate search bar input string match
+      const matchesSearch = m.name.toLowerCase().includes(normalizedSearch);
+      
+      // 🔄 THE FIX: If the ticket has a category, strictly require m.category_id to match it.
+      // Do not fall back to "true" unless the ticket itself has no category string set at all.
+      const matchesCategory = ticket?.request_category
+        ? Number(m.category_id) === currentTicketCategoryId
+        : true;
+        
+      return matchesSearch && matchesCategory;
+    });
+  }, [materials, matSearch, currentTicketCategoryId, ticket?.request_category]);
+  
+  // Helper calculation to figure out accurate, remaining warehouse inventory counts on the fly
+  const getRemainingStock = (material: any) => {
+    const activeLineItem = items.find(i => i.material_id === material.id);
+    const currentlyAllocated = activeLineItem ? activeLineItem.quantity : 0;
+    return Math.max(0, material.qty_available - currentlyAllocated);
+  };
 
   const addItem = (material: any) => {
     setItems(prev => {
       const existing = prev.find(i => i.material_id === material.id);
+      const remainingStock = getRemainingStock(material);
+      
+      if (remainingStock <= 0) {
+        toast.error("Cannot add more. No units remaining in available warehouse stock.");
+        return prev;
+      }
+
       if (existing) {
         return prev.map(i => i.material_id === material.id ? 
           { ...i, quantity: i.quantity + 1, total_price: (i.quantity + 1) * i.unit_price } : i);
@@ -85,7 +136,18 @@ export default function TicketWorkflow() {
     setItems(prev => {
       const newItems = [...prev];
       const item = newItems[index];
-      const newQty = Math.max(1, item.quantity + delta);
+      
+      const originalMaterial = materials?.find(m => m.id === item.material_id);
+      if (!originalMaterial) return prev;
+
+      const newQty = item.quantity + delta;
+      if (newQty < 1) return prev;
+      
+      if (newQty > originalMaterial.qty_available) {
+        toast.error(`Only ${originalMaterial.qty_available} units of this item exist in stock.`);
+        return prev;
+      }
+      
       newItems[index] = { ...item, quantity: newQty, total_price: newQty * item.unit_price };
       return newItems;
     });
@@ -100,6 +162,7 @@ export default function TicketWorkflow() {
   const isReadOnly = existingSubmission?.status === 'verified';
   const isCustomEmail = contactEmail !== currentUser.email;
 
+  // Clean Up Object temporary blob URLs to resolve browser memory leakage
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -108,15 +171,28 @@ export default function TicketWorkflow() {
       toast.error("File size must be less than 5MB");
       return;
     }
+
+    if (imagePreview && imagePreview.startsWith('blob:')) {
+      URL.revokeObjectURL(imagePreview);
+    }
     
     setImageFile(file);
     const objectUrl = URL.createObjectURL(file);
     setImagePreview(objectUrl);
   };
 
+  // ✨ NEW: Clear and remove photos from the workspace cleanly
+  const removeImage = () => {
+    if (imagePreview && imagePreview.startsWith('blob:')) {
+      URL.revokeObjectURL(imagePreview);
+    }
+    setImageFile(null);
+    setImagePreview(null);
+  };
+
   const handleSubmit = async () => {
     if (items.length === 0) {
-      toast.error("Please add at least one line item");
+      toast.error("Please add at least one line item before submitting.");
       return;
     }
   
@@ -124,8 +200,8 @@ export default function TicketWorkflow() {
   
     try {
       setUploadingImage(true);
-      let imageUrl = existingSubmission?.image_url || null;
-  
+      let imageUrl = imagePreview; // Retain existing URL if it wasn't removed
+
       if (imageFile) {
         const fileExt = imageFile.name.split('.').pop();
         const fileName = `${Date.now()}.${fileExt}`;
@@ -146,7 +222,6 @@ export default function TicketWorkflow() {
         imageUrl = publicUrl;
       }
   
-      // Map your items to ensure IDs match the database integer requirements
       const formattedItems = items.map(item => ({
         ...item,
         material_id: item.material_id ? Number(item.material_id) : null,
@@ -158,11 +233,10 @@ export default function TicketWorkflow() {
   
       await saveMutation.mutateAsync({
         submission: {
-          // 🔄 FIX 1: Pass numeric ID if editing so Supabase knows it's an update, not a new insert
           ...(existingSubmission?.id && { id: Number(existingSubmission.id) }),
           ticket_id: String(ticketId),
           status: 'submitted',
-          total_price: Number(totalPrice), // 🔄 FIX 2: Force numeric type safety
+          total_price: Number(totalPrice),
           contact_email: contactEmail || null,
           is_custom_email: !!isCustomEmail,
           image_url: imageUrl,
@@ -172,15 +246,15 @@ export default function TicketWorkflow() {
         },
         items: formattedItems
       });
-  
-      toast.success("Submission saved successfully");
+
+      toast.success("Submission saved successfully!");
     } catch (error: any) {
-      toast.error(error.message || "Failed to save submission");
+      console.error(error);
+      toast.error(error.message || "Failed to save submission. Please try again.");
     } finally {
       setUploadingImage(false);
     }
   };
-  
 
   if (ticketLoading || subLoading || matLoading) {
     return (
@@ -247,54 +321,80 @@ export default function TicketWorkflow() {
           <div className="flex-1 overflow-y-auto max-h-[60vh] p-2">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {filteredMaterials.map(mat => {
+                const liveRemainingStock = getRemainingStock(mat);
                 const isQtySet = mat.qty_available > 0;
                 const isPriceSet = mat.price > 0;
-                const canAddItem = isQtySet && isPriceSet;
-                const canAddText = canAddItem 
-                  ? "Add+" 
-                  : (!isQtySet ? "Not available" : "Price is not set");
+                
+                const canAddItem = isQtySet && isPriceSet && liveRemainingStock > 0;
+                const canAddText = liveRemainingStock <= 0 && isQtySet
+                  ? "Max Added" 
+                  : (!isQtySet ? "Not available" : (!isPriceSet ? "Price is not set" : "Add+"));
+
                 return (
-                  
-                <div 
-                  key={mat.id} 
-                  className={`flex flex-col justify-between p-3 border rounded-lg transition-colors group
-                    ${canAddItem 
-                      ? 'hover:border-primary hover:bg-primary/5 cursor-pointer' 
-                      : 'cursor-not-allowed opacity-60 bg-muted/30 dark:bg-muted/10'
-                    }
-                    `}
-                  onClick={() => canAddItem && addItem(mat)}
-                    >
-                  <div className="font-medium text-sm mb-2 group-hover:text-primary transition-colors">{mat.name}</div>
-                  <div className="flex justify-between items-center mt-auto pt-2 border-t border-border/50">
-                    <span className="font-mono font-semibold">${mat.price.toFixed(2)}</span>
-                    <Badge 
-                    variant="secondary" 
-                    className={`text-[10px] uppercase font-bold tracking-wider 
+                  <div 
+                    key={mat.id} 
+                    className={`flex flex-col justify-between p-3 border rounded-lg transition-colors group
                       ${canAddItem 
-                        ? 'bg-green-100 text-green-700 hover:bg-green-100' 
-                        : 'bg-red-100 text-red-700 hover:bg-red-100'
-                      }`}
-                    >
-                    {canAddText}
-                    </Badge>
+                        ? 'hover:border-primary hover:bg-primary/5 cursor-pointer' 
+                        : 'cursor-not-allowed opacity-60 bg-muted/30 dark:bg-muted/10'
+                      }
+                    `}
+                    onClick={() => canAddItem && addItem(mat)}
+                  >
+                    <div className="font-medium text-sm mb-1 group-hover:text-primary transition-colors">{mat.name}</div>
+                    
+                    {/* 🟢/🔴 COLOR-CODED UNITS: Dark green if > 0, red if 0 */}
+                    <div className="text-xs text-muted-foreground mb-3 font-medium">
+                      Available: <span className={`font-bold text-sm ${liveRemainingStock === 0 ? "text-rose-500" : "text-emerald-600 font-extrabold"}`}>{liveRemainingStock} units</span>
+                    </div>
+
+                    <div className="flex justify-between items-center mt-auto pt-2 border-t border-border/50">
+                      <span className="font-mono font-semibold">${mat.price.toFixed(2)}</span>
+                      <Badge 
+                        variant="secondary" 
+                        className={`text-[10px] uppercase font-bold tracking-wider 
+                          ${canAddItem 
+                            ? 'bg-green-100 text-green-700 hover:bg-green-100' 
+                            : 'bg-red-100 text-red-700 hover:bg-red-100'
+                          }`}
+                      >
+                        {canAddText}
+                      </Badge>
+                    </div>
                   </div>
-                </div>
-                )
+                );
               })}
               
               {filteredMaterials.length === 0 && (
-                <div className="col-span-2 p-8 text-center text-muted-foreground">
-                  No materials found matching "{matSearch}"
+                <div className="col-span-1 sm:col-span-2 p-10 flex flex-col items-center justify-center text-center border border-dashed rounded-xl bg-muted/10 my-2">
+                  {/* 🔄 Visual Anchor: High-utility layout icon descriptor */}
+                  <div className="rounded-full bg-muted p-3 mb-3 text-muted-foreground/70">
+                    <Search className="h-5 w-5" />
+                  </div>
+                  
+                  {matSearch ? (
+                    <>
+                      <h4 className="text-sm font-semibold text-foreground">No search matches</h4>
+                      <p className="text-xs text-muted-foreground mt-1 max-w-xs">
+                        We couldn't find any catalog items matching your term <span className="font-mono bg-muted px-1 py-0.5 rounded text-foreground">"{matSearch}"</span>.
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <h4 className="text-sm font-semibold text-foreground">Category is empty</h4>
+                      <p className="text-xs text-muted-foreground mt-1 max-w-xs">
+                        There are currently no inventory materials allocated to the <span className="font-bold text-foreground capitalize">"{ticket.request_category}"</span> department shelf.
+                      </p>
+                    </>
+                  )}
                 </div>
               )}
             </div>
           </div>
         </Card>
 
-        {/* Right Column: Workflow */}
+        {/* Right Column: Workflow Layout Panels */}
         <div className="space-y-6">
-          
           <Card className="bg-card shadow-sm border-primary/20 border-t-4">
             <CardContent className="p-5">
               <div className="flex justify-between items-start mb-4">
@@ -326,8 +426,8 @@ export default function TicketWorkflow() {
                   <div className="text-sm font-semibold text-blue-800 dark:text-blue-300 uppercase tracking-wider mb-1">Existing Submission</div>
                   <div className="flex items-center gap-3">
                     <SubmissionStatusBadge status={existingSubmission.status} />
-                    <span className="text-sm font-medium">v{existingSubmission.version_index}</span>
-                    {existingSubmission.edited && <Badge variant="outline" className="text-[10px] bg-background">EDITED</Badge>}
+                    {/* Versions clean up update */}
+                    {existingSubmission.edited && <Badge variant="outline" className="text-[10px] bg-background font-bold">EDITED</Badge>}
                   </div>
                 </div>
                 <div className="text-right">
@@ -362,28 +462,38 @@ export default function TicketWorkflow() {
                       </TableCell>
                     </TableRow>
                   ) : (
-                    items.map((item, idx) => (
-                      <TableRow key={idx}>
-                        <TableCell className="font-medium text-sm">{item.name}</TableCell>
-                        <TableCell>
-                          <div className="flex items-center justify-center gap-1">
-                            <Button variant="outline" size="icon" className="h-6 w-6" disabled={isReadOnly || item.quantity <= 1} onClick={() => updateItemQty(idx, -1)}>
-                              <Minus className="h-3 w-3" />
+                    items.map((item, idx) => {
+                      const originalMat = materials?.find(m => m.id === item.material_id);
+                      const maxStock = originalMat ? originalMat.qty_available : 0;
+                      return (
+                        <TableRow key={idx}>
+                          <TableCell className="font-medium text-sm">{item.name}</TableCell>
+                          <TableCell>
+                            <div className="flex items-center justify-center gap-1">
+                              <Button variant="outline" size="icon" className="h-6 w-6" disabled={isReadOnly || item.quantity <= 1} onClick={() => updateItemQty(idx, -1)}>
+                                <Minus className="h-3 w-3" />
+                              </Button>
+                              <span className="w-6 text-center font-mono text-sm">{item.quantity}</span>
+                              <Button 
+                                variant="outline" 
+                                size="icon" 
+                                className="h-6 w-6" 
+                                disabled={isReadOnly || item.quantity >= maxStock} 
+                                onClick={() => updateItemQty(idx, 1)}
+                              >
+                                <Plus className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-right font-mono text-sm">${item.total_price.toFixed(2)}</TableCell>
+                          <TableCell className="text-right">
+                            <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:bg-destructive/10" disabled={isReadOnly} onClick={() => removeItem(idx)}>
+                              <Trash2 className="h-4 w-4" />
                             </Button>
-                            <span className="w-6 text-center font-mono text-sm">{item.quantity}</span>
-                            <Button variant="outline" size="icon" className="h-6 w-6" disabled={isReadOnly} onClick={() => updateItemQty(idx, 1)}>
-                              <Plus className="h-3 w-3" />
-                            </Button>
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-right font-mono text-sm">${item.total_price.toFixed(2)}</TableCell>
-                        <TableCell className="text-right">
-                          <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:bg-destructive/10" disabled={isReadOnly} onClick={() => removeItem(idx)}>
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    ))
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })
                   )}
                 </TableBody>
               </Table>
@@ -399,7 +509,6 @@ export default function TicketWorkflow() {
               <CardTitle className="text-sm font-semibold uppercase tracking-wider">Submission Details</CardTitle>
             </CardHeader>
             <CardContent className="p-5 space-y-6">
-              
               <div className="space-y-3">
                 <label className="text-sm font-medium leading-none block">Contact Email</label>
                 <Input 
@@ -424,9 +533,14 @@ export default function TicketWorkflow() {
                 {imagePreview ? (
                   <div className="relative rounded-lg border overflow-hidden bg-muted/30 group">
                     <img src={imagePreview} alt="Preview" className="w-full h-48 object-contain" />
-                    <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                    
+                    {/* 🛠️ REMOVABLE ACTION CONTAINER: Replaces or discards current photo selection completely */}
+                    <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
                       <Button variant="secondary" size="sm" onClick={() => document.getElementById('image-upload')?.click()}>
-                        Replace Image
+                        Replace Photo
+                      </Button>
+                      <Button variant="destructive" size="sm" className="gap-1" onClick={removeImage}>
+                        <X className="h-4 w-4" /> Remove
                       </Button>
                     </div>
                   </div>
@@ -478,10 +592,10 @@ export default function TicketWorkflow() {
               )}
             </CardFooter>
           </Card>
-
         </div>
       </div>
 
+      {/* RowSpan Column Block Export Previews Container */}
       <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
         <DialogContent className="max-w-4xl w-[95vw]">
           <DialogHeader>
@@ -509,26 +623,40 @@ export default function TicketWorkflow() {
               </TableHeader>
               <TableBody>
                 {items.map((item, i) => (
-                  <TableRow key={i} className="even:bg-muted/30">
-                    <TableCell>{ticket.ticket_owner}</TableCell>
-                    <TableCell className="font-bold">{ticket.ticket_id}</TableCell>
-                    <TableCell className="truncate max-w-[150px]">{ticket.subject}</TableCell>
-                    <TableCell>{ticket.request_category}</TableCell>
-                    <TableCell>
-                      {contactEmail} {isCustomEmail && '⚠'}
-                    </TableCell>
-                    <TableCell>{item.name}</TableCell>
+                  <TableRow key={i} className="hover:bg-muted/10">
+                    {i === 0 && (
+                      <>
+                        <TableCell rowSpan={items.length} className="align-top border-r bg-background font-medium">
+                          {ticket.ticket_owner}
+                        </TableCell>
+                        <TableCell rowSpan={items.length} className="align-top border-r bg-background font-bold">
+                          {ticket.ticket_id}
+                        </TableCell>
+                        <TableCell rowSpan={items.length} className="align-top border-r bg-background truncate max-w-[130px]" title={ticket.subject}>
+                          {ticket.subject}
+                        </TableCell>
+                        <TableCell rowSpan={items.length} className="align-top border-r bg-background">
+                          {ticket.request_category}
+                        </TableCell>
+                        <TableCell rowSpan={items.length} className="align-top border-r bg-background max-w-[120px] truncate">
+                          {contactEmail} {isCustomEmail && '⚠'}
+                        </TableCell>
+                      </>
+                    )}
+                    <TableCell className="font-sans font-medium">{item.name}</TableCell>
                     <TableCell className="text-right">{item.quantity}</TableCell>
-                    <TableCell className="text-right">${item.unit_price.toFixed(2)}</TableCell>
-                    <TableCell className="text-right font-bold">${item.total_price.toFixed(2)}</TableCell>
-                    <TableCell className="text-center">
-                      {imagePreview ? '{attached: true}' : '—'}
-                    </TableCell>
+                    <TableCell className="text-right">${Number(item.unit_price).toFixed(2)}</TableCell>
+                    <TableCell className="text-right font-bold">${Number(item.total_price).toFixed(2)}</TableCell>
+                    {i === 0 && (
+                      <TableCell rowSpan={items.length} className="text-center align-middle border-l bg-background font-medium">
+                        {imagePreview ? '{attached: true}' : '—'}
+                      </TableCell>
+                    )}
                   </TableRow>
                 ))}
                 <TableRow className="bg-muted/50 border-t-2">
                   <TableCell colSpan={8} className="text-right font-bold uppercase tracking-wider">Total Submission</TableCell>
-                  <TableCell className="text-right font-bold text-sm">${totalPrice.toFixed(2)}</TableCell>
+                  <TableCell className="text-right font-bold text-sm text-emerald-600">${totalPrice.toFixed(2)}</TableCell>
                   <TableCell></TableCell>
                 </TableRow>
               </TableBody>
