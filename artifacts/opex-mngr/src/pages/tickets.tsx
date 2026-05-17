@@ -38,6 +38,8 @@ export default function Tickets() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [viewMode, setViewMode] = useState<"list" | "group">("list");
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 10;
 
   const filteredTickets = useMemo(() => {
     if (!tickets) return [];
@@ -49,6 +51,11 @@ export default function Tickets() {
       return matchSearch && matchStatus && matchCategory;
     });
   }, [tickets, search, statusFilter, categoryFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredTickets.length / PAGE_SIZE));
+  const pagedTickets = filteredTickets.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  const resetPage = () => setPage(1);
 
   const groupedTickets = useMemo(() => {
     const groups: Record<string, typeof filteredTickets> = {};
@@ -95,12 +102,12 @@ export default function Tickets() {
               placeholder="Search by ID or owner..." 
               className="pl-9"
               value={search}
-              onChange={e => setSearch(e.target.value)}
+              onChange={e => { setSearch(e.target.value); resetPage(); }}
               data-testid="input-search-tickets"
             />
           </div>
           
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <Select value={statusFilter} onValueChange={v => { setStatusFilter(v); resetPage(); }}>
             <SelectTrigger className="w-full md:w-[150px]">
               <SelectValue placeholder="Status" />
             </SelectTrigger>
@@ -111,7 +118,7 @@ export default function Tickets() {
             </SelectContent>
           </Select>
 
-          <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+          <Select value={categoryFilter} onValueChange={v => { setCategoryFilter(v); resetPage(); }}>
             <SelectTrigger className="w-full md:w-[200px]">
               <SelectValue placeholder="Category" />
             </SelectTrigger>
@@ -159,7 +166,7 @@ export default function Tickets() {
       ) : isMobile ? (
         <div className="space-y-4">
           {viewMode === 'list' ? (
-            filteredTickets.map(ticket => (
+            pagedTickets.map(ticket => (
               <Card key={ticket.id} className="overflow-hidden">
                 <CardHeader className="p-4 pb-2">
                   <div className="flex justify-between items-start">
@@ -242,7 +249,7 @@ export default function Tickets() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredTickets.map((ticket) => (
+                {pagedTickets.map((ticket) => (
                   <TableRow key={ticket.id} className="group hover:bg-muted/50 transition-colors">
                     <TableCell className="font-mono font-bold">{ticket.ticket_id}</TableCell>
                     <TableCell className="font-medium text-muted-foreground">{ticket.ticket_owner}</TableCell>
@@ -298,6 +305,35 @@ export default function Tickets() {
               ))}
             </Accordion>
           )}
+        </div>
+      )}
+
+      {viewMode === 'list' && filteredTickets.length > 0 && (
+        <div className="flex items-center justify-between text-sm text-muted-foreground">
+          <span>
+            Showing {Math.min((page - 1) * PAGE_SIZE + 1, filteredTickets.length)}–{Math.min(page * PAGE_SIZE, filteredTickets.length)} of {filteredTickets.length} tickets
+          </span>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPage(p => Math.max(1, p - 1))}
+              disabled={page === 1}
+              data-testid="button-pagination-prev"
+            >
+              Previous
+            </Button>
+            <span className="px-2">Page {page} of {totalPages}</span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+              disabled={page === totalPages}
+              data-testid="button-pagination-next"
+            >
+              Next
+            </Button>
+          </div>
         </div>
       )}
     </div>
