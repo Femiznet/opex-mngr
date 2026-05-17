@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "opex-mngr"
+version = "1.0.0"
+id = "artifacts/opex-mngr"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 21820
+
+[services.development]
+run = "pnpm --filter @workspace/opex-mngr run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/opex-mngr", "run", "build" ]
+publicDir = "artifacts/opex-mngr/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "21820"
+BASE_PATH = "/"
