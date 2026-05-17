@@ -119,19 +119,19 @@ export default function TicketWorkflow() {
       toast.error("Please add at least one line item");
       return;
     }
-
+  
     if (!ticketId) return;
-
+  
     try {
       setUploadingImage(true);
       let imageUrl = existingSubmission?.image_url || null;
-
+  
       if (imageFile) {
         const fileExt = imageFile.name.split('.').pop();
         const fileName = `${Date.now()}.${fileExt}`;
         const filePath = `${ticketId}/${fileName}`;
         
-        const { error: uploadError, data: uploadData } = await supabase.storage
+        const { error: uploadError } = await supabase.storage
           .from('ticket-attachments')
           .upload(filePath, imageFile);
           
@@ -145,22 +145,34 @@ export default function TicketWorkflow() {
           
         imageUrl = publicUrl;
       }
-
+  
+      // Map your items to ensure IDs match the database integer requirements
+      const formattedItems = items.map(item => ({
+        ...item,
+        material_id: item.material_id ? Number(item.material_id) : null,
+        quantity: Number(item.quantity),
+        unit_price: Number(item.unit_price),
+        total_price: Number(item.total_price),
+        is_custom: !!item.is_custom
+      }));
+  
       await saveMutation.mutateAsync({
         submission: {
-          ticket_id: ticketId,
+          // 🔄 FIX 1: Pass numeric ID if editing so Supabase knows it's an update, not a new insert
+          ...(existingSubmission?.id && { id: Number(existingSubmission.id) }),
+          ticket_id: String(ticketId),
           status: 'submitted',
-          total_price: totalPrice,
-          contact_email: contactEmail,
-          is_custom_email: isCustomEmail,
+          total_price: Number(totalPrice), // 🔄 FIX 2: Force numeric type safety
+          contact_email: contactEmail || null,
+          is_custom_email: !!isCustomEmail,
           image_url: imageUrl,
           image_attached: !!imageUrl,
-          edited: existingSubmission ? true : false,
-          version_index: (existingSubmission?.version_index || 0) + 1
+          edited: !!existingSubmission,
+          version_index: (Number(existingSubmission?.version_index) || 0) + 1
         },
-        items
+        items: formattedItems
       });
-
+  
       toast.success("Submission saved successfully");
     } catch (error: any) {
       toast.error(error.message || "Failed to save submission");
@@ -168,6 +180,7 @@ export default function TicketWorkflow() {
       setUploadingImage(false);
     }
   };
+  
 
   if (ticketLoading || subLoading || matLoading) {
     return (
@@ -233,21 +246,43 @@ export default function TicketWorkflow() {
           </div>
           <div className="flex-1 overflow-y-auto max-h-[60vh] p-2">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {filteredMaterials.map(mat => (
+              {filteredMaterials.map(mat => {
+                const isQtySet = mat.qty_available > 0;
+                const isPriceSet = mat.price > 0;
+                const canAddItem = isQtySet && isPriceSet;
+                const canAddText = canAddItem 
+                  ? "Add+" 
+                  : (!isQtySet ? "Not available" : "Price is not set");
+                return (
+                  
                 <div 
                   key={mat.id} 
-                  className="flex flex-col justify-between p-3 border rounded-lg hover:border-primary hover:bg-primary/5 cursor-pointer transition-colors group"
-                  onClick={() => addItem(mat)}
-                >
+                  className={`flex flex-col justify-between p-3 border rounded-lg transition-colors group
+                    ${canAddItem 
+                      ? 'hover:border-primary hover:bg-primary/5 cursor-pointer' 
+                      : 'cursor-not-allowed opacity-60 bg-muted/30 dark:bg-muted/10'
+                    }
+                    `}
+                  onClick={() => canAddItem && addItem(mat)}
+                    >
                   <div className="font-medium text-sm mb-2 group-hover:text-primary transition-colors">{mat.name}</div>
                   <div className="flex justify-between items-center mt-auto pt-2 border-t border-border/50">
                     <span className="font-mono font-semibold">${mat.price.toFixed(2)}</span>
-                    <Badge variant="secondary" className="text-[10px] uppercase font-bold tracking-wider">
-                      Add +
+                    <Badge 
+                    variant="secondary" 
+                    className={`text-[10px] uppercase font-bold tracking-wider 
+                      ${canAddItem 
+                        ? 'bg-green-100 text-green-700 hover:bg-green-100' 
+                        : 'bg-red-100 text-red-700 hover:bg-red-100'
+                      }`}
+                    >
+                    {canAddText}
                     </Badge>
                   </div>
                 </div>
-              ))}
+                )
+              })}
+              
               {filteredMaterials.length === 0 && (
                 <div className="col-span-2 p-8 text-center text-muted-foreground">
                   No materials found matching "{matSearch}"

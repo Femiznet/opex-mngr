@@ -102,6 +102,8 @@ export function useSubmissionVersions(submissionId?: string) {
   });
 }
 
+import { TablesInsert } from "@/integrations/supabase/types"; // Adjust path to your types file
+
 export function useSaveSubmission() {
   const queryClient = useQueryClient();
   
@@ -109,8 +111,9 @@ export function useSaveSubmission() {
     mutationFn: async ({
       submission, items
     }: {
-      submission: Partial<Submission> & { ticket_id: string },
-      items: Omit<SubmissionItem, 'id' | 'submission_id'>[]
+      // 🔄 FIX 1: Enforce input constraints from your synced Supabase schema types
+      submission: TablesInsert<"submissions"> & { ticket_id: string },
+      items: Omit<TablesInsert<"submission_items">, 'id' | 'submission_id'>[]
     }) => {
       // Upsert submission
       const { data: subData, error: subError } = await supabase
@@ -121,6 +124,7 @@ export function useSaveSubmission() {
         
       if (subError) throw subError;
       
+      // subData.id will natively be a number here
       const submissionId = subData.id;
       
       // Delete existing items
@@ -145,7 +149,8 @@ export function useSaveSubmission() {
       
       await supabase.from('submission_versions').insert({
         submission_id: submissionId,
-        snapshot
+        // We cast as any because snapshot maps to our Json definition type helper safely
+        snapshot: snapshot as any 
       });
       
       return subData;
