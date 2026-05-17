@@ -153,10 +153,14 @@ export default function Admin() {
                     <TableCell><AdminSubmissionStatusBadge status={sub.status} /></TableCell>
                     <TableCell className="text-right font-semibold">${Number(sub.total_price).toFixed(2)}</TableCell>
                     <TableCell>
-                      <div className="flex items-center gap-1.5">
-                        <span className="truncate max-w-[150px]">{sub.contact_email || "—"}</span>
-                        {sub.is_custom_email && <AlertTriangle className="h-3.5 w-3.5 text-yellow-500" title="Custom email" />}
-                      </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="truncate max-w-[150px]">{sub.contact_email || "—"}</span>
+                      {sub.is_custom_email && (
+                        <span title="Custom email" className="flex items-center">
+                          <AlertTriangle className="h-3.5 w-3.5 text-yellow-500" />
+                        </span>
+                      )}
+                    </div>
                     </TableCell>
                     <TableCell className="text-center">
                       {sub.image_attached ? <Paperclip className="h-4 w-4 mx-auto text-muted-foreground" /> : <span className="text-muted-foreground">—</span>}
