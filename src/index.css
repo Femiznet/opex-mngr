@@ -1,6 +1,6 @@
 @import "tailwindcss";
 @import "tw-animate-css";
-@import "@tailwindcss/typography";
+@plugin "@tailwindcss/typography";
 
 /* ─── TAILWIND V4 THEME ENGINE CONFIGURATION ────────────────────────── */
 /* If your CSS linter still fails on @theme, we declare it inside a standard utility block */
