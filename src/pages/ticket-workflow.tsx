@@ -37,7 +37,6 @@ export default function TicketWorkflow() {
   const [uploadingImage, setUploadingImage] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
 
-  // Initialize state parameters from existing submission structures
   useEffect(() => {
     if (existingSubmission) {
       setContactEmail(existingSubmission.contact_email || currentUser.email);
@@ -58,77 +57,45 @@ export default function TicketWorkflow() {
     }
   }, [existingItems]);
 
-  // Unsaved Changes Navigation Guard Interceptor
   useEffect(() => {
     if (items.length === 0 || existingSubmission?.status === 'verified') return;
-
-    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      e.preventDefault();
-    };
-
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => e.preventDefault();
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, [items.length, existingSubmission?.status]);
 
-  // Map string ticket request categories to raw numeric database category IDs
   const currentTicketCategoryId = useMemo(() => {
-    const requestCategory = ticket?.request_category;
-    if (!categories || !requestCategory) return null;
-
-    const normalizedCategory = requestCategory.toLowerCase();
-    const found = categories.find((c: any) => c.name?.toLowerCase() === normalizedCategory);
-
+    if (!categories || !ticket?.request_category) return null;
+    const found = categories.find((c: any) => c.name?.toLowerCase() === ticket.request_category?.toLowerCase());
     return found ? Number(found.id) : null;
   }, [categories, ticket?.request_category]);
 
   const filteredMaterials = useMemo(() => {
     if (!materials) return [];
-    
-    const normalizedSearch = matSearch.toLowerCase();
-  
+    const q = matSearch.toLowerCase();
     return materials.filter(m => {
-      // 1. Validate search bar input string match
-      const matchesSearch = m.name.toLowerCase().includes(normalizedSearch);
-      
-      // 🔄 THE FIX: If the ticket has a category, strictly require m.category_id to match it.
-      // Do not fall back to "true" unless the ticket itself has no category string set at all.
-      const matchesCategory = ticket?.request_category
-        ? Number(m.category_id) === currentTicketCategoryId
-        : true;
-        
+      const matchesSearch = m.name.toLowerCase().includes(q);
+      const matchesCategory = ticket?.request_category ? Number(m.category_id) === currentTicketCategoryId : true;
       return matchesSearch && matchesCategory;
     });
   }, [materials, matSearch, currentTicketCategoryId, ticket?.request_category]);
-  
-  // Helper calculation to figure out accurate, remaining warehouse inventory counts on the fly
+
   const getRemainingStock = (material: any) => {
-    const activeLineItem = items.find(i => i.material_id === material.id);
-    const currentlyAllocated = activeLineItem ? activeLineItem.quantity : 0;
-    return Math.max(0, material.qty_available - currentlyAllocated);
+    const item = items.find(i => i.material_id === material.id);
+    return Math.max(0, material.qty_available - (item ? item.quantity : 0));
   };
 
   const addItem = (material: any) => {
     setItems(prev => {
       const existing = prev.find(i => i.material_id === material.id);
-      const remainingStock = getRemainingStock(material);
-      
-      if (remainingStock <= 0) {
+      if (getRemainingStock(material) <= 0) {
         toast.error("Cannot add more. No units remaining in available warehouse stock.");
         return prev;
       }
-
       if (existing) {
-        return prev.map(i => i.material_id === material.id ? 
-          { ...i, quantity: i.quantity + 1, total_price: (i.quantity + 1) * i.unit_price } : i);
+        return prev.map(i => i.material_id === material.id ? { ...i, quantity: i.quantity + 1, total_price: (i.quantity + 1) * i.unit_price } : i);
       }
-      return [...prev, {
-        material_id: material.id,
-        name: material.name,
-        quantity: 1,
-        unit_price: material.price,
-        total_price: material.price,
-        is_custom: false
-      }];
+      return [...prev, { material_id: material.id, name: material.name, quantity: 1, unit_price: material.price, total_price: material.price, is_custom: false }];
     });
   };
 
@@ -136,56 +103,38 @@ export default function TicketWorkflow() {
     setItems(prev => {
       const newItems = [...prev];
       const item = newItems[index];
-      
       const originalMaterial = materials?.find(m => m.id === item.material_id);
       if (!originalMaterial) return prev;
-
       const newQty = item.quantity + delta;
       if (newQty < 1) return prev;
-      
       if (newQty > originalMaterial.qty_available) {
         toast.error(`Only ${originalMaterial.qty_available} units of this item exist in stock.`);
         return prev;
       }
-      
       newItems[index] = { ...item, quantity: newQty, total_price: newQty * item.unit_price };
       return newItems;
     });
   };
 
-  const removeItem = (index: number) => {
-    setItems(prev => prev.filter((_, i) => i !== index));
-  };
-
+  const removeItem = (index: number) => setItems(prev => prev.filter((_, i) => i !== index));
   const totalPrice = useMemo(() => items.reduce((sum, item) => sum + Number(item.total_price), 0), [items]);
-
   const isReadOnly = existingSubmission?.status === 'verified';
   const isCustomEmail = contactEmail !== currentUser.email;
 
-  // Clean Up Object temporary blob URLs to resolve browser memory leakage
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    
     if (file.size > 5 * 1024 * 1024) {
       toast.error("File size must be less than 5MB");
       return;
     }
-
-    if (imagePreview && imagePreview.startsWith('blob:')) {
-      URL.revokeObjectURL(imagePreview);
-    }
-    
+    if (imagePreview?.startsWith('blob:')) URL.revokeObjectURL(imagePreview);
     setImageFile(file);
-    const objectUrl = URL.createObjectURL(file);
-    setImagePreview(objectUrl);
+    setImagePreview(URL.createObjectURL(file));
   };
 
-  // ✨ NEW: Clear and remove photos from the workspace cleanly
   const removeImage = () => {
-    if (imagePreview && imagePreview.startsWith('blob:')) {
-      URL.revokeObjectURL(imagePreview);
-    }
+    if (imagePreview?.startsWith('blob:')) URL.revokeObjectURL(imagePreview);
     setImageFile(null);
     setImagePreview(null);
   };
@@ -195,42 +144,17 @@ export default function TicketWorkflow() {
       toast.error("Please add at least one line item before submitting.");
       return;
     }
-  
     if (!ticketId) return;
-  
     try {
       setUploadingImage(true);
-      let imageUrl = imagePreview; // Retain existing URL if it wasn't removed
-
+      let imageUrl = imagePreview;
       if (imageFile) {
         const fileExt = imageFile.name.split('.').pop();
-        const fileName = `${Date.now()}.${fileExt}`;
-        const filePath = `${ticketId}/${fileName}`;
-        
-        const { error: uploadError } = await supabase.storage
-          .from('ticket-attachments')
-          .upload(filePath, imageFile);
-          
-        if (uploadError) {
-          throw new Error("Failed to upload image: " + uploadError.message);
-        }
-        
-        const { data: { publicUrl } } = supabase.storage
-          .from('ticket-attachments')
-          .getPublicUrl(filePath);
-          
-        imageUrl = publicUrl;
+        const filePath = `${ticketId}/${Date.now()}.${fileExt}`;
+        const { error: uploadError } = await supabase.storage.from('ticket-attachments').upload(filePath, imageFile);
+        if (uploadError) throw new Error("Failed to upload image: " + uploadError.message);
+        imageUrl = supabase.storage.from('ticket-attachments').getPublicUrl(filePath).data.publicUrl;
       }
-  
-      const formattedItems = items.map(item => ({
-        ...item,
-        material_id: item.material_id ? Number(item.material_id) : null,
-        quantity: Number(item.quantity),
-        unit_price: Number(item.unit_price),
-        total_price: Number(item.total_price),
-        is_custom: !!item.is_custom
-      }));
-  
       await saveMutation.mutateAsync({
         submission: {
           ...(existingSubmission?.id && { id: Number(existingSubmission.id) }),
@@ -244,56 +168,31 @@ export default function TicketWorkflow() {
           edited: !!existingSubmission,
           version_index: (Number(existingSubmission?.version_index) || 0) + 1
         },
-        items: formattedItems
+        items: items.map(item => ({ ...item, material_id: Number(item.material_id), quantity: Number(item.quantity), unit_price: Number(item.unit_price), total_price: Number(item.total_price), is_custom: !!item.is_custom }))
       });
-
       toast.success("Submission saved successfully!");
     } catch (error: any) {
       console.error(error);
-      toast.error(error.message || "Failed to save submission. Please try again.");
+      toast.error(error.message || "Failed to save submission.");
     } finally {
       setUploadingImage(false);
     }
   };
 
-  if (ticketLoading || subLoading || matLoading) {
-    return (
-      <div className="container mx-auto p-6 space-y-6">
-        <Skeleton className="h-10 w-32 mb-6" />
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          <Skeleton className="h-[600px] rounded-lg" />
-          <div className="space-y-6">
-            <Skeleton className="h-48 rounded-lg" />
-            <Skeleton className="h-64 rounded-lg" />
-            <Skeleton className="h-32 rounded-lg" />
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (!ticket) {
-    return (
-      <div className="container mx-auto p-6 flex flex-col items-center justify-center min-h-[60vh] text-center">
-        <h2 className="text-2xl font-bold mb-2">Ticket Not Found</h2>
-        <p className="text-muted-foreground mb-6">The ticket you're looking for doesn't exist or you don't have access.</p>
-        <Link href="/tickets">
-          <Button>Return to Tickets</Button>
-        </Link>
-      </div>
-    );
-  }
+  if (ticketLoading || subLoading || matLoading) return <WorkflowSkeleton />;
+  if (!ticket) return <WorkflowNotFound />;
 
   return (
-    <div className="container mx-auto p-4 md:p-6 pb-24 lg:pb-6">
+    <div className="container mx-auto p-4 md:p-6 pb-24 lg:pb-6 animate-in fade-in slide-in-from-bottom-3 duration-500 ease-out">
+      {/* Back & Export Control Bar */}
       <div className="mb-6">
-        <Button variant="ghost" size="sm" className="pl-0 gap-2 mb-4 text-muted-foreground hover:text-foreground" onClick={() => setLocation('/tickets')}>
-          <ArrowLeft className="h-4 w-4" /> Back to tickets
+        <Button variant="ghost" size="sm" className="pl-0 gap-2 mb-4 text-muted-foreground hover:text-foreground group" onClick={() => setLocation('/tickets')}>
+          <ArrowLeft className="h-4 w-4 group-hover:-translate-x-1 transition-transform" /> Back to tickets
         </Button>
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <h1 className="text-2xl font-bold tracking-tight font-mono">{ticket.ticket_id}</h1>
+          <h1 className="text-2xl font-bold tracking-tight font-mono text-foreground">{ticket.ticket_id}</h1>
           {existingSubmission && existingSubmission.status !== 'draft' && (
-            <Button variant="outline" onClick={() => setPreviewOpen(true)} className="gap-2">
+            <Button variant="outline" onClick={() => setPreviewOpen(true)} className="gap-2 shadow-sm hover:bg-muted/50">
               <Eye className="h-4 w-4" /> Preview Export
             </Button>
           )}
@@ -301,372 +200,272 @@ export default function TicketWorkflow() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.2fr] gap-6 items-start">
+        {/* Left Column Component */}
+        <MaterialsCatalog 
+          matSearch={matSearch} 
+          setMatSearch={setMatSearch} 
+          filteredMaterials={filteredMaterials} 
+          getRemainingStock={getRemainingStock} 
+          addItem={addItem} 
+          isReadOnly={isReadOnly} 
+          categoryName={ticket.request_category} 
+        />
         
-        {/* Left Column: Materials */}
-        <Card className={`h-full flex flex-col ${isReadOnly ? 'opacity-50 pointer-events-none' : ''}`}>
-          <CardHeader className="pb-3 border-b bg-muted/20">
-            <CardTitle className="text-lg">Materials Catalog</CardTitle>
-          </CardHeader>
-          <div className="p-4 border-b">
-            <div className="relative">
-              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input 
-                placeholder="Search materials..." 
-                className="pl-9"
-                value={matSearch}
-                onChange={e => setMatSearch(e.target.value)}
-              />
-            </div>
-          </div>
-          <div className="flex-1 overflow-y-auto max-h-[60vh] p-2">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {filteredMaterials.map(mat => {
-                const liveRemainingStock = getRemainingStock(mat);
-                const isQtySet = mat.qty_available > 0;
-                const isPriceSet = mat.price > 0;
-                
-                const canAddItem = isQtySet && isPriceSet && liveRemainingStock > 0;
-                const canAddText = liveRemainingStock <= 0 && isQtySet
-                  ? "Max Added" 
-                  : (!isQtySet ? "Not available" : (!isPriceSet ? "Price is not set" : "Add+"));
-
-                return (
-                  <div 
-                    key={mat.id} 
-                    className={`flex flex-col justify-between p-3 border rounded-lg transition-colors group
-                      ${canAddItem 
-                        ? 'hover:border-primary hover:bg-primary/5 cursor-pointer' 
-                        : 'cursor-not-allowed opacity-60 bg-muted/30 dark:bg-muted/10'
-                      }
-                    `}
-                    onClick={() => canAddItem && addItem(mat)}
-                  >
-                    <div className="font-medium text-sm mb-1 group-hover:text-primary transition-colors">{mat.name}</div>
-                    
-                    {/* 🟢/🔴 COLOR-CODED UNITS: Dark green if > 0, red if 0 */}
-                    <div className="text-xs text-muted-foreground mb-3 font-medium">
-                      Available: <span className={`font-bold text-sm ${liveRemainingStock === 0 ? "text-rose-500" : "text-emerald-600 font-extrabold"}`}>{liveRemainingStock} units</span>
-                    </div>
-
-                    <div className="flex justify-between items-center mt-auto pt-2 border-t border-border/50">
-                      <span className="font-mono font-semibold">${mat.price.toFixed(2)}</span>
-                      <Badge 
-                        variant="secondary" 
-                        className={`text-[10px] uppercase font-bold tracking-wider 
-                          ${canAddItem 
-                            ? 'bg-green-100 text-green-700 hover:bg-green-100' 
-                            : 'bg-red-100 text-red-700 hover:bg-red-100'
-                          }`}
-                      >
-                        {canAddText}
-                      </Badge>
-                    </div>
-                  </div>
-                );
-              })}
-              
-              {filteredMaterials.length === 0 && (
-                <div className="col-span-1 sm:col-span-2 p-10 flex flex-col items-center justify-center text-center border border-dashed rounded-xl bg-muted/10 my-2">
-                  {/* 🔄 Visual Anchor: High-utility layout icon descriptor */}
-                  <div className="rounded-full bg-muted p-3 mb-3 text-muted-foreground/70">
-                    <Search className="h-5 w-5" />
-                  </div>
-                  
-                  {matSearch ? (
-                    <>
-                      <h4 className="text-sm font-semibold text-foreground">No search matches</h4>
-                      <p className="text-xs text-muted-foreground mt-1 max-w-xs">
-                        We couldn't find any catalog items matching your term <span className="font-mono bg-muted px-1 py-0.5 rounded text-foreground">"{matSearch}"</span>.
-                      </p>
-                    </>
-                  ) : (
-                    <>
-                      <h4 className="text-sm font-semibold text-foreground">Category is empty</h4>
-                      <p className="text-xs text-muted-foreground mt-1 max-w-xs">
-                        There are currently no inventory materials allocated to the <span className="font-bold text-foreground capitalize">"{ticket.request_category}"</span> department shelf.
-                      </p>
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-        </Card>
-
-        {/* Right Column: Workflow Layout Panels */}
+        {/* Right Column Stack Components */}
         <div className="space-y-6">
-          <Card className="bg-card shadow-sm border-primary/20 border-t-4">
-            <CardContent className="p-5">
-              <div className="flex justify-between items-start mb-4">
-                <div>
-                  <h3 className="text-lg font-bold line-clamp-2">{ticket.subject}</h3>
-                  <div className="text-sm text-muted-foreground mt-1">{ticket.ticket_owner}</div>
-                </div>
-                <Badge variant={ticket.status === 'open' ? 'default' : 'secondary'} className={ticket.status === 'open' ? 'bg-blue-500' : ''}>
-                  {ticket.status.toUpperCase()}
-                </Badge>
-              </div>
-              <div className="grid grid-cols-2 gap-y-3 gap-x-4 text-sm mt-4 p-4 bg-muted/30 rounded-lg">
-                <div>
-                  <span className="text-muted-foreground block text-xs uppercase font-semibold mb-1">Category</span>
-                  <span className="font-medium">{ticket.request_category || "—"}</span>
-                </div>
-                <div>
-                  <span className="text-muted-foreground block text-xs uppercase font-semibold mb-1">Location</span>
-                  <span className="font-medium truncate block" title={ticket.address || ""}>{ticket.address || "—"}</span>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
+          <TicketMetaDataCard ticket={ticket} />
+          
           {existingSubmission && (
-            <Card className="bg-blue-50/50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-900">
+            <Card className="bg-blue-50/40 dark:bg-blue-950/10 border-blue-200/60 dark:border-blue-900/40 shadow-sm">
               <CardContent className="p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                 <div>
-                  <div className="text-sm font-semibold text-blue-800 dark:text-blue-300 uppercase tracking-wider mb-1">Existing Submission</div>
-                  <div className="flex items-center gap-3">
+                  <div className="text-[11px] font-bold text-blue-700 dark:text-blue-400 uppercase tracking-widest mb-1.5">Existing Submission</div>
+                  <div className="flex items-center gap-2">
                     <SubmissionStatusBadge status={existingSubmission.status} />
-                    {/* Versions clean up update */}
-                    {existingSubmission.edited && <Badge variant="outline" className="text-[10px] bg-background font-bold">EDITED</Badge>}
+                    {existingSubmission.edited && <Badge variant="outline" className="text-[10px] bg-background border-blue-200 text-blue-700 font-bold">EDITED</Badge>}
                   </div>
                 </div>
-                <div className="text-right">
-                  <div className="text-sm text-muted-foreground">Recorded Total</div>
-                  <div className="text-xl font-bold font-mono">${Number(existingSubmission.total_price).toFixed(2)}</div>
+                <div className="text-left sm:text-right">
+                  <div className="text-xs text-muted-foreground font-medium">Recorded Total</div>
+                  <div className="text-xl font-black font-mono text-blue-900 dark:text-blue-300">${Number(existingSubmission.total_price).toFixed(2)}</div>
                 </div>
               </CardContent>
             </Card>
           )}
 
-          <Card className="flex flex-col border shadow-sm overflow-hidden">
-            <div className="bg-muted/50 p-3 px-5 border-b flex justify-between items-center">
-              <h3 className="font-semibold">Line Items</h3>
-              <Badge variant="secondary" className="font-mono">{items.length} items</Badge>
-            </div>
-            
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-[40%]">Item</TableHead>
-                    <TableHead className="text-center w-[20%]">Qty</TableHead>
-                    <TableHead className="text-right w-[20%]">Price</TableHead>
-                    <TableHead className="w-[10%]"></TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {items.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={4} className="text-center h-32 text-muted-foreground italic">
-                        Select materials from the catalog to add items
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    items.map((item, idx) => {
-                      const originalMat = materials?.find(m => m.id === item.material_id);
-                      const maxStock = originalMat ? originalMat.qty_available : 0;
-                      return (
-                        <TableRow key={idx}>
-                          <TableCell className="font-medium text-sm">{item.name}</TableCell>
-                          <TableCell>
-                            <div className="flex items-center justify-center gap-1">
-                              <Button variant="outline" size="icon" className="h-6 w-6" disabled={isReadOnly || item.quantity <= 1} onClick={() => updateItemQty(idx, -1)}>
-                                <Minus className="h-3 w-3" />
-                              </Button>
-                              <span className="w-6 text-center font-mono text-sm">{item.quantity}</span>
-                              <Button 
-                                variant="outline" 
-                                size="icon" 
-                                className="h-6 w-6" 
-                                disabled={isReadOnly || item.quantity >= maxStock} 
-                                onClick={() => updateItemQty(idx, 1)}
-                              >
-                                <Plus className="h-3 w-3" />
-                              </Button>
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-right font-mono text-sm">${item.total_price.toFixed(2)}</TableCell>
-                          <TableCell className="text-right">
-                            <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:bg-destructive/10" disabled={isReadOnly} onClick={() => removeItem(idx)}>
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })
-                  )}
-                </TableBody>
-              </Table>
-            </div>
-            <div className="p-4 bg-muted/20 border-t flex justify-between items-center">
-              <span className="font-bold text-muted-foreground uppercase tracking-wider text-sm">Total Subtotal</span>
-              <span className="text-2xl font-bold font-mono">${totalPrice.toFixed(2)}</span>
-            </div>
-          </Card>
-
-          <Card className={isReadOnly ? 'opacity-70 pointer-events-none' : ''}>
-            <CardHeader className="pb-3 border-b bg-muted/20">
-              <CardTitle className="text-sm font-semibold uppercase tracking-wider">Submission Details</CardTitle>
-            </CardHeader>
-            <CardContent className="p-5 space-y-6">
-              <div className="space-y-3">
-                <label className="text-sm font-medium leading-none block">Contact Email</label>
-                <Input 
-                  type="email" 
-                  value={contactEmail} 
-                  onChange={e => setContactEmail(e.target.value)}
-                  placeholder="Email for admin communication"
-                  className="bg-background"
-                />
-                {isCustomEmail && (
-                  <p className="text-xs text-yellow-600 dark:text-yellow-500 font-medium">
-                    Custom email provided. Notifications will be sent here instead of the default address.
-                  </p>
-                )}
-              </div>
-
-              <Separator />
-
-              <div className="space-y-3">
-                <label className="text-sm font-medium leading-none block">Attach ticket photo (optional)</label>
-                
-                {imagePreview ? (
-                  <div className="relative rounded-lg border overflow-hidden bg-muted/30 group">
-                    <img src={imagePreview} alt="Preview" className="w-full h-48 object-contain" />
-                    
-                    {/* 🛠️ REMOVABLE ACTION CONTAINER: Replaces or discards current photo selection completely */}
-                    <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
-                      <Button variant="secondary" size="sm" onClick={() => document.getElementById('image-upload')?.click()}>
-                        Replace Photo
-                      </Button>
-                      <Button variant="destructive" size="sm" className="gap-1" onClick={removeImage}>
-                        <X className="h-4 w-4" /> Remove
-                      </Button>
-                    </div>
-                  </div>
-                ) : (
-                  <div 
-                    className="border-2 border-dashed rounded-lg p-8 flex flex-col items-center justify-center text-center cursor-pointer hover:bg-muted/50 transition-colors bg-muted/10"
-                    onClick={() => document.getElementById('image-upload')?.click()}
-                  >
-                    <div className="p-3 bg-background rounded-full shadow-sm mb-3">
-                      <ImageIcon className="h-6 w-6 text-muted-foreground" />
-                    </div>
-                    <p className="text-sm font-medium mb-1">Click to upload image</p>
-                    <p className="text-xs text-muted-foreground">JPEG, PNG or WebP up to 5MB</p>
-                  </div>
-                )}
-                <input 
-                  id="image-upload" 
-                  type="file" 
-                  accept="image/jpeg,image/png,image/webp" 
-                  className="hidden" 
-                  onChange={handleImageChange}
-                />
-              </div>
-
-            </CardContent>
-            <CardFooter className="p-5 bg-muted/30 border-t flex flex-col sm:flex-row gap-3 items-center justify-between">
-              {isReadOnly ? (
-                <p className="text-sm font-medium text-amber-600 flex-1 w-full flex items-center gap-2 bg-amber-50 dark:bg-amber-950/30 p-3 rounded border border-amber-200 dark:border-amber-900/50">
-                  <Eye className="h-4 w-4" /> This submission has been verified and cannot be edited.
-                </p>
-              ) : (
-                <>
-                  <p className="text-xs text-muted-foreground w-full sm:w-auto text-center sm:text-left">
-                    Submitting will overwrite any previous drafts.
-                  </p>
-                  <Button 
-                    size="lg" 
-                    className="w-full sm:w-auto font-bold px-8 shadow-md hover:shadow-lg transition-all"
-                    onClick={handleSubmit}
-                    disabled={items.length === 0 || saveMutation.isPending || uploadingImage}
-                  >
-                    {saveMutation.isPending || uploadingImage ? (
-                      <span className="flex items-center gap-2">Uploading <UploadCloud className="h-4 w-4 animate-pulse" /></span>
-                    ) : (
-                      "Submit Expenses"
-                    )}
-                  </Button>
-                </>
-              )}
-            </CardFooter>
-          </Card>
+          <LineItemsTable items={items} materials={materials} isReadOnly={isReadOnly} updateItemQty={updateItemQty} removeItem={removeItem} totalPrice={totalPrice} />
+          
+          <SubmissionDetailsCard 
+            contactEmail={contactEmail} setContactEmail={setContactEmail} isCustomEmail={isCustomEmail} imagePreview={imagePreview} handleImageChange={handleImageChange} removeImage={removeImage} isReadOnly={isReadOnly} handleSubmit={handleSubmit} items={items} pending={saveMutation.isPending || uploadingImage} 
+          />
         </div>
       </div>
 
-      {/* RowSpan Column Block Export Previews Container */}
-      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
-        <DialogContent className="max-w-4xl w-[95vw]">
-          <DialogHeader>
-            <DialogTitle className="text-xl">Submission export preview</DialogTitle>
-            <DialogDescription>
-              This is how your submission will appear in the admin export.
-            </DialogDescription>
-          </DialogHeader>
-          
-          <div className="overflow-x-auto border rounded-md mt-4 font-mono text-xs">
-            <Table>
-              <TableHeader className="bg-muted">
-                <TableRow>
-                  <TableHead>owner</TableHead>
-                  <TableHead>ticket</TableHead>
-                  <TableHead>subject</TableHead>
-                  <TableHead>category</TableHead>
-                  <TableHead>email</TableHead>
-                  <TableHead>material</TableHead>
-                  <TableHead className="text-right">qty</TableHead>
-                  <TableHead className="text-right">price</TableHead>
-                  <TableHead className="text-right">total</TableHead>
-                  <TableHead className="text-center">img</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {items.map((item, i) => (
-                  <TableRow key={i} className="hover:bg-muted/10">
-                    {i === 0 && (
-                      <>
-                        <TableCell rowSpan={items.length} className="align-top border-r bg-background font-medium">
-                          {ticket.ticket_owner}
-                        </TableCell>
-                        <TableCell rowSpan={items.length} className="align-top border-r bg-background font-bold">
-                          {ticket.ticket_id}
-                        </TableCell>
-                        <TableCell rowSpan={items.length} className="align-top border-r bg-background truncate max-w-[130px]" title={ticket.subject}>
-                          {ticket.subject}
-                        </TableCell>
-                        <TableCell rowSpan={items.length} className="align-top border-r bg-background">
-                          {ticket.request_category}
-                        </TableCell>
-                        <TableCell rowSpan={items.length} className="align-top border-r bg-background max-w-[120px] truncate">
-                          {contactEmail} {isCustomEmail && '⚠'}
-                        </TableCell>
-                      </>
-                    )}
-                    <TableCell className="font-sans font-medium">{item.name}</TableCell>
-                    <TableCell className="text-right">{item.quantity}</TableCell>
-                    <TableCell className="text-right">${Number(item.unit_price).toFixed(2)}</TableCell>
-                    <TableCell className="text-right font-bold">${Number(item.total_price).toFixed(2)}</TableCell>
-                    {i === 0 && (
-                      <TableCell rowSpan={items.length} className="text-center align-middle border-l bg-background font-medium">
-                        {imagePreview ? '{attached: true}' : '—'}
-                      </TableCell>
-                    )}
+      <ExportPreviewDialog previewOpen={previewOpen} setPreviewOpen={setPreviewOpen} ticket={ticket} items={items} contactEmail={contactEmail} isCustomEmail={isCustomEmail} imagePreview={imagePreview} totalPrice={totalPrice} />
+    </div>
+  );
+}
+
+/* ─── ISOLATED SYSTEM COMPONENTS FOR MANAGEABLE MAINTENANCE ──────────────── */
+
+function MaterialsCatalog({ matSearch, setMatSearch, filteredMaterials, getRemainingStock, addItem, isReadOnly, categoryName }: any) {
+  return (
+    <Card className={`h-full flex flex-col shadow-sm border border-border/60 ${isReadOnly ? 'opacity-50 pointer-events-none' : ''}`}>
+      <CardHeader className="pb-3 border-b bg-muted/10"><CardTitle className="text-lg font-bold">Materials Catalog</CardTitle></CardHeader>
+      <div className="p-4 border-b">
+        <div className="relative group">
+          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Input placeholder="Search materials..." className="pl-9" value={matSearch} onChange={e => setMatSearch(e.target.value)} />
+        </div>
+      </div>
+      <div className="flex-1 overflow-y-auto max-h-[60vh] p-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {filteredMaterials.map((mat: any) => {
+            const stock = getRemainingStock(mat);
+            const canAdd = mat.qty_available > 0 && mat.price > 0 && stock > 0;
+            const text = stock <= 0 && mat.qty_available > 0 ? "Max Added" : (!mat.qty_available ? "Not available" : (!mat.price ? "Price un-set" : "Add+"));
+            return (
+              <div key={mat.id} className={`flex flex-col justify-between p-3 border rounded-xl transition-all group ${canAdd ? 'hover:border-primary/60 hover:bg-primary/5 hover:scale-[1.01] cursor-pointer shadow-sm' : 'cursor-not-allowed opacity-60 bg-muted/30'}`} onClick={() => canAdd && addItem(mat)}>
+                <div className="font-semibold text-sm mb-1 group-hover:text-primary">{mat.name}</div>
+                <div className="text-xs text-muted-foreground mb-3 font-medium">Available: <span className={`font-bold text-sm ${stock === 0 ? "text-rose-500" : "text-emerald-600 font-extrabold"}`}>{stock} units</span></div>
+                <div className="flex justify-between items-center mt-auto pt-2 border-t border-border/40">
+                  <span className="font-mono font-bold text-foreground/80">${mat.price.toFixed(2)}</span>
+                  <Badge variant="secondary" className={`text-[10px] uppercase font-bold tracking-wider ${canAdd ? 'bg-green-50 text-green-700 border-green-200/50' : 'bg-red-50 text-red-700 border-red-100/50'}`}>{text}</Badge>
+                </div>
+              </div>
+            );
+          })}
+          {filteredMaterials.length === 0 && (
+            <div className="col-span-1 sm:col-span-2 p-10 flex flex-col items-center justify-center border border-dashed rounded-xl bg-muted/5">
+              <div className="rounded-full bg-muted/60 p-3 mb-3 text-muted-foreground/60"><Search className="h-5 w-5" /></div>
+              <h4 className="text-sm font-semibold">{matSearch ? "No search matches" : "Category empty"}</h4>
+              <p className="text-xs text-muted-foreground mt-1 max-w-sm text-center">{matSearch ? `No matches found for "${matSearch}".` : `No allocated stock materials on "${categoryName}" shelf.`}</p>
+            </div>
+          )}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function TicketMetaDataCard({ ticket }: { ticket: any }) {
+  return (
+    <Card className="bg-card shadow-sm border-primary/30 border border-t-4">
+      <CardContent className="p-5">
+        <div className="flex justify-between items-start gap-2 mb-4">
+          <div>
+            <h3 className="text-lg font-bold text-foreground line-clamp-2">{ticket.subject}</h3>
+            <div className="text-sm text-muted-foreground mt-0.5">{ticket.ticket_owner}</div>
+          </div>
+          <Badge variant={ticket.status === 'open' ? 'default' : 'secondary'} className={ticket.status === 'open' ? 'bg-blue-500' : ''}>{ticket.status.toUpperCase()}</Badge>
+        </div>
+        <div className="grid grid-cols-2 gap-y-3 gap-x-4 text-sm mt-4 p-4 bg-muted/30 border rounded-xl">
+          <div><span className="text-muted-foreground block text-xs uppercase font-bold tracking-wider mb-1">Category</span><span className="font-semibold">{ticket.request_category || "—"}</span></div>
+          <div><span className="text-muted-foreground block text-xs uppercase font-bold tracking-wider mb-1">Location</span><span className="font-semibold block truncate" title={ticket.address}>{ticket.address || "—"}</span></div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function LineItemsTable({ items, materials, isReadOnly, updateItemQty, removeItem, totalPrice }: any) {
+  return (
+    <Card className="flex flex-col border border-border/60 shadow-sm overflow-hidden">
+      <div className="bg-muted/50 p-3 px-5 border-b flex justify-between items-center">
+        <h3 className="font-bold text-sm">Line Items</h3>
+        <Badge variant="secondary" className="font-mono font-bold">{items.length} items</Badge>
+      </div>
+      <div className="overflow-x-auto">
+        <Table>
+          <TableHeader><TableRow className="bg-muted/20"><TableHead className="w-[45%] font-bold">Item</TableHead><TableHead className="text-center w-[25%] font-bold">Qty</TableHead><TableHead className="text-right w-[20%] font-bold">Price</TableHead><TableHead className="w-[10%]"></TableHead></TableRow></TableHeader>
+          <TableBody>
+            {items.length === 0 ? (
+              <TableRow><TableCell colSpan={4} className="text-center h-28 text-muted-foreground italic bg-background/40">Select materials from the catalog to populate items</TableCell></TableRow>
+            ) : (
+              items.map((item: any, idx: number) => {
+                const originalMat = materials?.find((m: any) => m.id === item.material_id);
+                return (
+                  <TableRow key={idx} className="hover:bg-muted/30 border-b border-border/40">
+                    <TableCell className="font-semibold text-sm text-foreground/80">{item.name}</TableCell>
+                    <TableCell>
+                      <div className="flex items-center justify-center gap-1.5">
+                        <Button variant="outline" size="icon" className="h-6 w-6 rounded-md" disabled={isReadOnly || item.quantity <= 1} onClick={() => updateItemQty(idx, -1)}><Minus className="h-3 w-3" /></Button>
+                        <span className="w-7 text-center font-mono text-sm font-bold">{item.quantity}</span>
+                        <Button variant="outline" size="icon" className="h-6 w-6 rounded-md" disabled={isReadOnly || item.quantity >= (originalMat ? originalMat.qty_available : 0)} onClick={() => updateItemQty(idx, 1)}><Plus className="h-3 w-3" /></Button>
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-sm font-bold">${item.total_price.toFixed(2)}</TableCell>
+                    <TableCell className="text-right pr-4">
+                      <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:bg-destructive/10" disabled={isReadOnly} onClick={() => removeItem(idx)}><Trash2 className="h-4 w-4" /></Button>
+                    </TableCell>
                   </TableRow>
-                ))}
-                <TableRow className="bg-muted/50 border-t-2">
-                  <TableCell colSpan={8} className="text-right font-bold uppercase tracking-wider">Total Submission</TableCell>
-                  <TableCell className="text-right font-bold text-sm text-emerald-600">${totalPrice.toFixed(2)}</TableCell>
-                  <TableCell></TableCell>
+                );
+              })
+            )}
+          </TableBody>
+        </Table>
+      </div>
+      <div className="p-4 bg-muted/10 border-t flex justify-between items-center">
+        <span className="font-bold text-muted-foreground uppercase tracking-wider text-xs">Total Subtotal</span>
+        <span className="text-2xl font-black font-mono">${totalPrice.toFixed(2)}</span>
+      </div>
+    </Card>
+  );
+}
+
+function SubmissionDetailsCard({ contactEmail, setContactEmail, isCustomEmail, imagePreview, handleImageChange, removeImage, isReadOnly, handleSubmit, items, pending }: any) {
+  return (
+    <Card className={`shadow-sm border border-border/60 ${isReadOnly ? 'opacity-70 pointer-events-none' : ''}`}>
+      <CardHeader className="pb-3 border-b bg-muted/20"><CardTitle className="text-xs font-bold uppercase tracking-widest text-foreground/80">Submission Details</CardTitle></CardHeader>
+      <CardContent className="p-5 space-y-6">
+        <div className="space-y-2">
+          <label className="text-sm font-bold text-foreground/80 block">Contact Email</label>
+          <Input type="email" value={contactEmail} onChange={e => setContactEmail(e.target.value)} placeholder="Email for communication" className="bg-background border-border/80" />
+          {isCustomEmail && <p className="text-xs text-amber-600 dark:text-amber-500 font-semibold mt-1">⚠️ Custom email provided. Notifications will route here instead of default user bounds.</p>}
+        </div>
+        <Separator className="bg-border/60" />
+        <div className="space-y-2">
+          <label className="text-sm font-bold text-foreground/80 block">Attach ticket photo (optional)</label>
+          {imagePreview ? (
+            <div className="relative rounded-xl border overflow-hidden bg-muted/20 group shadow-inner">
+              <img src={imagePreview} alt="Preview" className="w-full h-44 object-contain p-2" />
+              <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 duration-200">
+                <Button variant="secondary" size="sm" onClick={() => document.getElementById('image-upload')?.click()}>Replace Photo</Button>
+                <Button variant="destructive" size="sm" className="gap-1" onClick={removeImage}><X className="h-4 w-4" /> Remove</Button>
+              </div>
+            </div>
+          ) : (
+            <div className="border-2 border-dashed rounded-xl p-6 flex flex-col items-center justify-center text-center cursor-pointer hover:bg-muted/40 hover:border-primary/40 bg-muted/5 group" onClick={() => document.getElementById('image-upload')?.click()}>
+              <div className="p-3 bg-background rounded-full shadow-sm mb-2.5 group-hover:scale-110 transition-transform border"><ImageIcon className="h-5 w-5 text-muted-foreground/80 group-hover:text-primary" /></div>
+              <p className="text-sm font-bold text-foreground/80 mb-0.5">Click to upload photo</p>
+              <p className="text-xs text-muted-foreground">JPEG, PNG or WebP formats up to 5MB</p>
+            </div>
+          )}
+          <input id="image-upload" type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={handleImageChange} />
+        </div>
+      </CardContent>
+      <CardFooter className="p-4 bg-muted/30 border-t flex flex-col sm:flex-row gap-3 items-center justify-between">
+        {isReadOnly ? (
+          <p className="text-xs font-semibold text-amber-700 flex-1 w-full flex items-center gap-2 bg-amber-50/80 dark:bg-amber-950/20 p-3 rounded-lg border">
+            <Eye className="h-4 w-4 text-amber-600" /> This submission has been verified and cannot be edited further.
+          </p>
+        ) : (
+          <>
+            <p className="text-xs text-muted-foreground font-medium">Submitting overrides any previous balance drafts.</p>
+            <Button size="lg" className="w-full sm:w-auto font-bold px-8 shadow-sm" onClick={handleSubmit} disabled={items.length === 0 || pending}>
+              {pending ? <span className="flex items-center gap-2">Uploading <UploadCloud className="h-4 w-4 animate-pulse" /></span> : "Submit Expenses"}
+            </Button>
+          </>
+        )}
+      </CardFooter>
+    </Card>
+  );
+}
+
+function ExportPreviewDialog({ previewOpen, setPreviewOpen, ticket, items, contactEmail, isCustomEmail, imagePreview, totalPrice }: any) {
+  return (
+    <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+      <DialogContent className="max-w-4xl w-[95vw] rounded-xl bg-card">
+        <DialogHeader>
+          <DialogTitle className="text-lg font-bold">Submission export preview</DialogTitle>
+          <DialogDescription className="text-xs">This details how your formatted submission entries parse inside the administrative backend sheet panel.</DialogDescription>
+        </DialogHeader>
+        <div className="overflow-x-auto border rounded-xl font-mono text-[11px] shadow-sm max-h-[55vh]">
+          <Table>
+            <TableHeader className="bg-muted/80 sticky top-0 z-20"><TableRow className="hover:bg-muted/80"><TableHead className="font-bold text-foreground">owner</TableHead><TableHead className="font-bold text-foreground">ticket</TableHead><TableHead className="font-bold text-foreground">subject</TableHead><TableHead className="font-bold text-foreground">category</TableHead><TableHead className="font-bold text-foreground">email</TableHead><TableHead className="font-bold text-foreground">material</TableHead><TableHead className="text-center font-bold text-foreground">qty</TableHead><TableHead className="text-right font-bold text-foreground">price</TableHead><TableHead className="text-right font-bold text-foreground">total</TableHead><TableHead className="text-center font-bold text-foreground">img</TableHead></TableRow></TableHeader>
+            <TableBody>
+              {items.map((item: any, i: number) => (
+                <TableRow key={i} className="hover:bg-muted/10 transition-colors">
+                  {i === 0 && (
+                    <>
+                      <TableCell rowSpan={items.length} className="align-top border-r bg-background font-medium">{ticket.ticket_owner}</TableCell>
+                      <TableCell rowSpan={items.length} className="align-top border-r bg-background font-bold">{ticket.ticket_id}</TableCell>
+                      <TableCell rowSpan={items.length} className="align-top border-r bg-background truncate max-w-[130px]" title={ticket.subject}>{ticket.subject}</TableCell>
+                      <TableCell rowSpan={items.length} className="align-top border-r bg-background">{ticket.request_category}</TableCell>
+                      <TableCell rowSpan={items.length} className="align-top border-r bg-background max-w-[120px] truncate">{contactEmail} {isCustomEmail && '⚠'}</TableCell>
+                    </>
+                  )}
+                  <TableCell className="font-sans font-medium">{item.name}</TableCell>
+                  <TableCell className="text-center">{item.quantity}</TableCell>
+                  <TableCell className="text-right">${Number(item.unit_price).toFixed(2)}</TableCell>
+                  <TableCell className="text-right font-bold">${Number(item.total_price).toFixed(2)}</TableCell>
+                  {i === 0 && <TableCell rowSpan={items.length} className="text-center align-middle border-l bg-background font-medium">{imagePreview ? '{attached: true}' : '—'}</TableCell>}
                 </TableRow>
-              </TableBody>
-            </Table>
-          </div>
-          <div className="flex justify-end mt-4">
-            <Button variant="outline" onClick={() => setPreviewOpen(false)}>Close Preview</Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+              ))}
+              <TableRow className="bg-muted/50 border-t-2">
+                <TableCell colSpan={8} className="text-right font-bold uppercase tracking-wider">Total Submission</TableCell>
+                <TableCell className="text-right font-bold text-sm text-emerald-600">${totalPrice.toFixed(2)}</TableCell>
+                <TableCell></TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
+        </div>
+        <div className="flex justify-end mt-4"><Button variant="outline" onClick={() => setPreviewOpen(false)}>Close Preview</Button></div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function WorkflowSkeleton() {
+  return (
+    <div className="container mx-auto p-6 space-y-6 animate-pulse">
+      <Skeleton className="h-10 w-32 mb-6" />
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <Skeleton className="h-[600px] rounded-xl" />
+        <div className="space-y-6">
+          <Skeleton className="h-48 rounded-xl" /><Skeleton className="h-64 rounded-xl" /><Skeleton className="h-32 rounded-xl" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function WorkflowNotFound() {
+  return (
+    <div className="container mx-auto p-6 flex flex-col items-center justify-center min-h-[60vh] text-center">
+      <h2 className="text-2xl font-bold mb-2">Ticket Not Found</h2>
+      <p className="text-muted-foreground mb-6">The ticket you're looking for doesn't exist or you don't have access.</p>
+      <Link href="/tickets"><Button>Return to Tickets</Button></Link>
     </div>
   );
 }
