@@ -1,21 +1,23 @@
 import { useState, useMemo } from "react";
-import { Link } from "wouter";
 import { useSubmissions } from "@/hooks/use-submissions";
-import { useCategories } from "@/hooks/use-materials";
+import { useCategories, useMaterials } from "@/hooks/use-materials";
+import { useTickets } from "@/hooks/use-tickets";
+import { supabase } from "@/lib/supabase";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Sheet, SheetContent, SheetTitle, SheetDescription } from "@/components/ui/sheet";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Textarea } from "@/components/ui/textarea";
-import { Search, ChevronDown, Paperclip, AlertTriangle, X } from "lucide-react";
+import { Search, ChevronDown, Paperclip, AlertTriangle, X, Download } from "lucide-react";
 import { format } from "date-fns";
 import { useSubmissionItems, useSubmissionVersions, Submission } from "@/hooks/use-submissions";
+import * as XLSX from "xlsx";
+import { toast } from "sonner";
 
 function AdminSubmissionStatusBadge({ status }: { status: string }) {
   if (status === 'verified') return <Badge className="bg-green-500 text-white border-transparent">Verified</Badge>;
