@@ -15,6 +15,6 @@ export default defineConfig({
   },
   server: {
     port: 5173,
-    allowedHosts:["odin-frowzier-spatteringly.ngrok-free.dev"]
+    allowedHosts: process.env.ALLOWED_HOSTS ? [process.env.ALLOWED_HOSTS] : []
   },
 });
