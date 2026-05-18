@@ -167,7 +167,7 @@ export default function TicketWorkflow() {
           image_attached: !!imageUrl,
           edited: !!existingSubmission,
           version_index: (Number(existingSubmission?.version_index) || 0) + 1
-        },
+        } as any,
         items: items.map(item => ({ ...item, material_id: Number(item.material_id), quantity: Number(item.quantity), unit_price: Number(item.unit_price), total_price: Number(item.total_price), is_custom: !!item.is_custom }))
       });
       toast.success("Submission saved successfully!");
