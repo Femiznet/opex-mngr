@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { useLocation } from "wouter";
+import { useLocation, Link } from "wouter";
 import { useTickets } from "@/hooks/use-tickets";
 import { useSubmissions } from "@/hooks/use-submissions";
 import { useCategories } from "@/hooks/use-materials";
