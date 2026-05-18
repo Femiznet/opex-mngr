@@ -10,11 +10,11 @@ function StatusBadge({ status }: { status: string }) {
   const key = status?.toLowerCase();
   const cls =
     key === "open"
-      ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20"
+      ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30"
       : key === "closed"
-      ? "bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20"
+      ? "bg-red-500/10 text-red-700 dark:text-red-400 border border-red-500/30"
       : "bg-muted text-muted-foreground border border-border";
-      
+
   return <span className={`px-2.5 py-0.5 text-xs font-semibold rounded-full uppercase tracking-wider ${cls}`}>{status}</span>;
 }
 
