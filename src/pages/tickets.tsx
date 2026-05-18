@@ -10,11 +10,11 @@ function StatusBadge({ status }: { status: string }) {
   const key = status?.toLowerCase();
   const cls =
     key === "open"
-      ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20"
+      ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30"
       : key === "closed"
-      ? "bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20"
+      ? "bg-red-500/10 text-red-700 dark:text-red-400 border border-red-500/30"
       : "bg-muted text-muted-foreground border border-border";
-      
+
   return <span className={`px-2.5 py-0.5 text-xs font-semibold rounded-full uppercase tracking-wider ${cls}`}>{status}</span>;
 }
 
@@ -90,10 +90,10 @@ export default function Tickets() {
     <div className="container mx-auto px-4 max-w-7xl py-6 space-y-6">
       {/* Header Block */}
       <div>
-        <h1 className="text-4xl font-black tracking-tight bg-gradient-to-r from-violet-600 via-pink-500 to-amber-500 bg-clip-text text-transparent block mb-1">
-          All Tickets
+        <h1 className="text-3xl font-bold tracking-tight text-foreground mb-1">
+          All tickets
         </h1>
-        <p className="text-muted-foreground text-base font-medium">
+        <p className="text-muted-foreground text-sm">
           Manage and track material expense sheets
         </p>
       </div>

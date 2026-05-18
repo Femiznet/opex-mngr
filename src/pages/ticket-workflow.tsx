@@ -167,7 +167,7 @@ export default function TicketWorkflow() {
           image_attached: !!imageUrl,
           edited: !!existingSubmission,
           version_index: (Number(existingSubmission?.version_index) || 0) + 1
-        },
+        } as any,
         items: items.map(item => ({ ...item, material_id: Number(item.material_id), quantity: Number(item.quantity), unit_price: Number(item.unit_price), total_price: Number(item.total_price), is_custom: !!item.is_custom }))
       });
       toast.success("Submission saved successfully!");
@@ -183,7 +183,7 @@ export default function TicketWorkflow() {
   if (!ticket) return <WorkflowNotFound />;
 
   return (
-    <div className="container mx-auto p-4 md:p-6 pb-24 lg:pb-6 animate-in fade-in slide-in-from-bottom-3 duration-500 ease-out">
+    <div className="container mx-auto p-4 md:p-6 pb-24 lg:pb-6 page-in">
       {/* Back & Export Control Bar */}
       <div className="mb-6">
         <Button variant="ghost" size="sm" className="pl-0 gap-2 mb-4 text-muted-foreground hover:text-foreground group" onClick={() => setLocation('/tickets')}>
@@ -250,33 +250,33 @@ export default function TicketWorkflow() {
 
 function MaterialsCatalog({ matSearch, setMatSearch, filteredMaterials, getRemainingStock, addItem, isReadOnly, categoryName }: any) {
   return (
-    <Card className={`h-full flex flex-col shadow-sm border border-border/60 ${isReadOnly ? 'opacity-50 pointer-events-none' : ''}`}>
-      <CardHeader className="pb-3 border-b bg-muted/10"><CardTitle className="text-lg font-bold">Materials Catalog</CardTitle></CardHeader>
+    <Card className={`flex flex-col shadow-sm border border-border/60 ${isReadOnly ? 'opacity-50 pointer-events-none' : ''}`}>
+      <CardHeader className="pb-3 border-b bg-muted/10"><CardTitle className="text-lg font-bold">Materials catalog</CardTitle></CardHeader>
       <div className="p-4 border-b">
         <div className="relative group">
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input placeholder="Search materials..." className="pl-9" value={matSearch} onChange={e => setMatSearch(e.target.value)} />
         </div>
       </div>
-      <div className="flex-1 overflow-y-auto max-h-[60vh] p-3">
+      <div className="p-3">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {filteredMaterials.map((mat: any) => {
             const stock = getRemainingStock(mat);
             const canAdd = mat.qty_available > 0 && mat.price > 0 && stock > 0;
-            const text = stock <= 0 && mat.qty_available > 0 ? "Max Added" : (!mat.qty_available ? "Not available" : (!mat.price ? "Price un-set" : "Add+"));
+            const text = stock <= 0 && mat.qty_available > 0 ? "Max added" : (!mat.qty_available ? "Not available" : (!mat.price ? "Price unset" : "Add +"));
             return (
-              <div key={mat.id} className={`flex flex-col justify-between p-3 border rounded-xl transition-all group ${canAdd ? 'hover:border-primary/60 hover:bg-primary/5 hover:scale-[1.01] cursor-pointer shadow-sm' : 'cursor-not-allowed opacity-60 bg-muted/30'}`} onClick={() => canAdd && addItem(mat)}>
+              <div key={mat.id} className={`flex flex-col justify-between p-3 border rounded-lg transition-colors group ${canAdd ? 'hover:border-primary/60 hover:bg-primary/5 cursor-pointer shadow-sm' : 'cursor-not-allowed opacity-60 bg-muted/30'}`} onClick={() => canAdd && addItem(mat)}>
                 <div className="font-semibold text-sm mb-1 group-hover:text-primary">{mat.name}</div>
-                <div className="text-xs text-muted-foreground mb-3 font-medium">Available: <span className={`font-bold text-sm ${stock === 0 ? "text-rose-500" : "text-emerald-600 font-extrabold"}`}>{stock} units</span></div>
+                <div className="text-xs text-muted-foreground mb-3 font-medium">Available: <span className={`font-bold text-sm ${stock === 0 ? "text-red-600" : "text-emerald-600 font-extrabold"}`}>{stock} units</span></div>
                 <div className="flex justify-between items-center mt-auto pt-2 border-t border-border/40">
                   <span className="font-mono font-bold text-foreground/80">${mat.price.toFixed(2)}</span>
-                  <Badge variant="secondary" className={`text-[10px] uppercase font-bold tracking-wider ${canAdd ? 'bg-green-50 text-green-700 border-green-200/50' : 'bg-red-50 text-red-700 border-red-100/50'}`}>{text}</Badge>
+                  <Badge variant="secondary" className={`text-[10px] uppercase font-bold tracking-wider ${canAdd ? 'bg-emerald-50 text-emerald-700 border-emerald-200/60 dark:bg-emerald-950/40 dark:text-emerald-300' : 'bg-red-50 text-red-700 border-red-100/60 dark:bg-red-950/40 dark:text-red-300'}`}>{text}</Badge>
                 </div>
               </div>
             );
           })}
           {filteredMaterials.length === 0 && (
-            <div className="col-span-1 sm:col-span-2 p-10 flex flex-col items-center justify-center border border-dashed rounded-xl bg-muted/5">
+            <div className="col-span-1 sm:col-span-2 p-8 flex flex-col items-center justify-center border border-dashed rounded-lg bg-muted/5">
               <div className="rounded-full bg-muted/60 p-3 mb-3 text-muted-foreground/60"><Search className="h-5 w-5" /></div>
               <h4 className="text-sm font-semibold">{matSearch ? "No search matches" : "Category empty"}</h4>
               <p className="text-xs text-muted-foreground mt-1 max-w-sm text-center">{matSearch ? `No matches found for "${matSearch}".` : `No allocated stock materials on "${categoryName}" shelf.`}</p>
@@ -297,7 +297,7 @@ function TicketMetaDataCard({ ticket }: { ticket: any }) {
             <h3 className="text-lg font-bold text-foreground line-clamp-2">{ticket.subject}</h3>
             <div className="text-sm text-muted-foreground mt-0.5">{ticket.ticket_owner}</div>
           </div>
-          <Badge variant={ticket.status === 'open' ? 'default' : 'secondary'} className={ticket.status === 'open' ? 'bg-blue-500' : ''}>{ticket.status.toUpperCase()}</Badge>
+          <Badge className={`uppercase font-bold tracking-wider border ${ticket.status === 'open' ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30' : 'bg-red-500/10 text-red-700 dark:text-red-400 border-red-500/30'}`}>{ticket.status}</Badge>
         </div>
         <div className="grid grid-cols-2 gap-y-3 gap-x-4 text-sm mt-4 p-4 bg-muted/30 border rounded-xl">
           <div><span className="text-muted-foreground block text-xs uppercase font-bold tracking-wider mb-1">Category</span><span className="font-semibold">{ticket.request_category || "—"}</span></div>
