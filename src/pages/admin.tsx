@@ -29,10 +29,13 @@ function AdminSubmissionStatusBadge({ status }: { status: string }) {
 export default function Admin() {
   const { data: submissions, isLoading } = useSubmissions();
   const { data: categories } = useCategories();
-  
+  const { data: tickets } = useTickets();
+  const { data: materials } = useMaterials();
+
   const [search, setSearch] = useState("");
   const [statusTab, setStatusTab] = useState("all");
   const [selectedSubmission, setSelectedSubmission] = useState<Submission | null>(null);
+  const [exporting, setExporting] = useState(false);
 
   const stats = useMemo(() => {
     if (!submissions) return { total: 0, submitted: 0, verified: 0, flagged: 0 };
@@ -47,20 +50,112 @@ export default function Admin() {
   const filteredSubmissions = useMemo(() => {
     if (!submissions) return [];
     return submissions.filter(s => {
-      const matchSearch = s.ticket_id.toLowerCase().includes(search.toLowerCase()); // we don't have ticket_owner joined easily here, but good enough for ID
+      const matchSearch = s.ticket_id.toLowerCase().includes(search.toLowerCase());
       const matchStatus = statusTab === "all" || s.status === statusTab;
       return matchSearch && matchStatus;
     });
   }, [submissions, search, statusTab]);
 
+  const handleExportExcel = async () => {
+    if (!submissions || !tickets || !materials) {
+      toast.error("Data still loading, please try again in a moment.");
+      return;
+    }
+    setExporting(true);
+    try {
+      const exportable = submissions.filter(s => s.status === 'submitted' || s.status === 'verified');
+      if (exportable.length === 0) {
+        toast.error("No submitted or verified records to export.");
+        setExporting(false);
+        return;
+      }
+
+      // Pull all items in one query
+      const ids = exportable.map(s => s.id);
+      const { data: allItems, error } = await supabase
+        .from('submission_items')
+        .select('*')
+        .in('submission_id', ids);
+      if (error) throw error;
+
+      const ticketByTid = new Map(tickets.map(t => [t.ticket_id, t]));
+      const materialById = new Map(materials.map(m => [m.id, m]));
+
+      // Build flat rows: ticket header row + material rows beneath
+      const rows: (string | number)[][] = [];
+      rows.push([
+        "TICKET NUMBER", "DESCRIPTION", "CATEGORY",
+        "material name", "quantity", "unit price", "total price",
+        "quantity left", "total value left", "date submitted", "image attachment"
+      ]);
+
+      for (const sub of exportable) {
+        const ticket = ticketByTid.get(sub.ticket_id);
+        // Ticket header row
+        rows.push([
+          sub.ticket_id,
+          ticket?.subject ?? "",
+          ticket?.request_category ?? "",
+          "", "", "", "", "", "", "", ""
+        ]);
+        const items = (allItems ?? []).filter(i => i.submission_id === sub.id);
+        const submittedAt = format(new Date(sub.updated_at), 'yyyy-MM-dd HH:mm');
+        const imageAttached = (sub as any).image_attached
+          ? JSON.stringify({ attached: true })
+          : JSON.stringify({ image: [] });
+        for (const it of items) {
+          const mat = it.material_id != null ? materialById.get(it.material_id) : null;
+          const quantityLeft = mat ? Math.max(0, Number(mat.qty_available) - Number(it.quantity)) : "";
+          const totalValueLeft = mat && typeof quantityLeft === "number"
+            ? Number((quantityLeft * Number(it.unit_price)).toFixed(2))
+            : "";
+          rows.push([
+            "", "", "",
+            it.name,
+            Number(it.quantity),
+            Number(it.unit_price),
+            Number(it.total_price),
+            quantityLeft,
+            totalValueLeft,
+            submittedAt,
+            imageAttached
+          ]);
+        }
+      }
+
+      const ws = XLSX.utils.aoa_to_sheet(rows);
+      ws['!cols'] = [
+        { wch: 16 }, { wch: 36 }, { wch: 18 },
+        { wch: 28 }, { wch: 10 }, { wch: 12 }, { wch: 12 },
+        { wch: 14 }, { wch: 16 }, { wch: 18 }, { wch: 22 },
+      ];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Submissions");
+      const stamp = format(new Date(), 'yyyyMMdd-HHmm');
+      XLSX.writeFile(wb, `opex-submissions-${stamp}.xlsx`);
+      toast.success(`Exported ${exportable.length} submission(s).`);
+    } catch (e: any) {
+      console.error(e);
+      toast.error(e.message || "Export failed.");
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
-    <div className="container mx-auto p-4 md:p-6 space-y-6">
-      <div className="flex flex-col gap-2">
-        <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-bold tracking-tight">Admin overview</h1>
-          <Badge variant="outline" className="bg-muted text-muted-foreground shadow-sm">Read-only</Badge>
+    <div className="container mx-auto p-4 md:p-6 space-y-6 page-in">
+      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-bold tracking-tight">Admin overview</h1>
+            <Badge variant="outline" className="bg-muted text-muted-foreground shadow-sm">Read-only</Badge>
+          </div>
+          <p className="text-muted-foreground text-sm">Submitted and verified materials across all tickets.</p>
         </div>
-        <p className="text-muted-foreground text-sm">Actions coming soon.</p>
+        <Button onClick={handleExportExcel} disabled={exporting || isLoading} className="gap-2">
+          <Download className="h-4 w-4" />
+          {exporting ? "Exporting…" : "Export Excel"}
+        </Button>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
