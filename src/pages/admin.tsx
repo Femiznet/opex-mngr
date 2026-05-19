@@ -297,9 +297,6 @@ function SubmissionSidePanel({ submission, open, onOpenChange }: { submission: S
               <SheetTitle className="text-2xl font-mono">{submission.ticket_id}</SheetTitle>
               <AdminSubmissionStatusBadge status={submission.status} />
             </div>
-            <Button variant="ghost" size="icon" onClick={() => onOpenChange(false)}>
-              <X className="h-5 w-5" />
-            </Button>
           </div>
           <SheetDescription>
             Last updated {format(new Date(submission.updated_at), 'PPpp')}
