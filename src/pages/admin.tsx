@@ -3,6 +3,8 @@ import { useSubmissions } from "@/hooks/use-submissions";
 import { useCategories, useMaterials } from "@/hooks/use-materials";
 import { useTickets } from "@/hooks/use-tickets";
 import { supabase } from "@/lib/supabase";
+import { SubmissionStatusBadge } from "@/components/status-badge";
+import { STATUS } from "@/lib/constants";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -19,13 +21,6 @@ import { useSubmissionItems, useSubmissionVersions, Submission } from "@/hooks/u
 import * as XLSX from "xlsx";
 import { toast } from "sonner";
 
-function AdminSubmissionStatusBadge({ status }: { status: string }) {
-  if (status === 'verified') return <Badge className="bg-green-500 text-white border-transparent">Verified</Badge>;
-  if (status === 'submitted') return <Badge className="bg-blue-500 text-white border-transparent">Submitted</Badge>;
-  if (status === 'failed' || status === 'invalid') return <Badge variant="destructive" className="capitalize">{status}</Badge>;
-  return <Badge variant="secondary" className="capitalize text-muted-foreground">{status}</Badge>;
-}
-
 export default function Admin() {
   const { data: submissions, isLoading } = useSubmissions();
   const { data: categories } = useCategories();
@@ -41,9 +36,9 @@ export default function Admin() {
     if (!submissions) return { total: 0, submitted: 0, verified: 0, flagged: 0 };
     return {
       total: submissions.length,
-      submitted: submissions.filter(s => s.status === 'submitted').length,
-      verified: submissions.filter(s => s.status === 'verified').length,
-      flagged: submissions.filter(s => s.status === 'failed' || s.status === 'invalid').length,
+      submitted: submissions.filter(s => s.status === STATUS.SUBMITTED).length,
+      verified: submissions.filter(s => s.status === STATUS.VERIFIED).length,
+      flagged: submissions.filter(s => s.status === STATUS.FAILED || s.status === STATUS.INVALID).length,
     };
   }, [submissions]);
 
@@ -63,7 +58,7 @@ export default function Admin() {
     }
     setExporting(true);
     try {
-      const exportable = submissions.filter(s => s.status === 'submitted' || s.status === 'verified');
+      const exportable = submissions.filter(s => s.status === STATUS.SUBMITTED || s.status === STATUS.VERIFIED);
       if (exportable.length === 0) {
         toast.error("No submitted or verified records to export.");
         setExporting(false);
@@ -247,7 +242,7 @@ export default function Admin() {
                     onClick={() => setSelectedSubmission(sub)}
                   >
                     <TableCell className="font-mono font-bold">{sub.ticket_id}</TableCell>
-                    <TableCell><AdminSubmissionStatusBadge status={sub.status} /></TableCell>
+                    <TableCell><SubmissionStatusBadge status={sub.status} /></TableCell>
                     <TableCell className="text-right font-semibold">${Number(sub.total_price).toFixed(2)}</TableCell>
                     <TableCell>
                     <div className="flex items-center gap-1.5">
@@ -295,7 +290,7 @@ function SubmissionSidePanel({ submission, open, onOpenChange }: { submission: S
           <div className="flex items-center justify-between mb-1">
             <div className="flex items-center gap-3">
               <SheetTitle className="text-2xl font-mono">{submission.ticket_id}</SheetTitle>
-              <AdminSubmissionStatusBadge status={submission.status} />
+              <SubmissionStatusBadge status={submission.status} />
             </div>
           </div>
           <SheetDescription>

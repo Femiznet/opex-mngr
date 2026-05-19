@@ -3,40 +3,11 @@ import { useLocation } from "wouter";
 import { useTickets } from "@/hooks/use-tickets";
 import { useSubmissions } from "@/hooks/use-submissions";
 import { useCategories } from "@/hooks/use-materials";
+import { TicketStatusBadge, SubmissionStatusBadge, CategoryBadge } from "@/components/status-badge";
+import { DEFAULT_PAGE_SIZE } from "@/lib/constants";
 import { LayoutList, Layers, Search, ChevronDown } from "lucide-react";
 
-/* ─── Badge helpers with adaptive Tailwind styles ────────────────────────── */
-function StatusBadge({ status }: { status: string }) {
-  const key = status?.toLowerCase();
-  const cls =
-    key === "open"
-      ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30"
-      : key === "closed"
-      ? "bg-red-500/10 text-red-700 dark:text-red-400 border border-red-500/30"
-      : "bg-muted text-muted-foreground border border-border";
-
-  return <span className={`px-2.5 py-0.5 text-xs font-semibold rounded-full uppercase tracking-wider ${cls}`}>{status}</span>;
-}
-
-export function SubmissionStatusBadge({ status }: { status?: string }) {
-  if (!status) return <span className="text-muted-foreground/40 text-xs">—</span>;
-  const key = status.toLowerCase();
-  const cls =
-    key === "verified"
-      ? "bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20"
-      : key === "submitted"
-      ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20"
-      : key === "failed" || key === "invalid"
-      ? "bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20"
-      : "bg-muted text-muted-foreground border border-border";
-      
-  return <span className={`px-2.5 py-0.5 text-xs font-medium rounded-md capitalize ${cls}`}>{status}</span>;
-}
-
-function CategoryBadge({ name }: { name?: string }) {
-  if (!name) return <span className="text-muted-foreground/40 text-xs">—</span>;
-  return <span className="px-2 py-0.5 text-xs font-medium rounded border border-border bg-muted/40 text-muted-foreground">{name}</span>;
-}
+/* ─── Badge helpers are now imported from @/components/status-badge ────────── */
 
 export default function Tickets() {
   const { data: tickets, isLoading: ticketsLoading } = useTickets();
@@ -50,7 +21,7 @@ export default function Tickets() {
   const [viewMode, setViewMode]           = useState<"list" | "group">("list");
   const [page, setPage]                   = useState(1);
   const [openGroups, setOpenGroups]       = useState<Record<string, boolean>>({});
-  const PAGE_SIZE = 10;
+  const PAGE_SIZE = DEFAULT_PAGE_SIZE;
 
   const getSubmissionStatus = (ticketId: string) =>
     submissions?.find((s) => s.ticket_id === ticketId)?.status;
@@ -204,7 +175,7 @@ export default function Tickets() {
                     <td className="p-4 text-muted-foreground hidden md:table-cell">{t.ticket_owner}</td>
                     <td className="p-4 font-medium max-w-xs truncate" title={t.subject}>{t.subject}</td>
                     <td className="p-4 hidden sm:table-cell"><CategoryBadge name={t.request_category ?? "-"} /></td>
-                    <td className="p-4"><StatusBadge status={t.status} /></td>
+                    <td className="p-4"><TicketStatusBadge status={t.status} /></td>
                     <td className="p-4"><SubmissionStatusBadge status={getSubmissionStatus(t.ticket_id)} /></td>
                   </tr>
                 ))}
@@ -244,7 +215,7 @@ export default function Tickets() {
                             <td className="p-4 font-mono font-bold text-violet-600 dark:text-violet-400 w-32 group-hover:underline">{t.ticket_id}</td>
                             <td className="p-4 text-muted-foreground hidden md:table-cell w-48">{t.ticket_owner}</td>
                             <td className="p-4 font-medium" title={t.subject}>{t.subject}</td>
-                            <td className="p-4 w-28"><StatusBadge status={t.status} /></td>
+                            <td className="p-4 w-28"><TicketStatusBadge status={t.status} /></td>
                             <td className="p-4 w-32"><SubmissionStatusBadge status={getSubmissionStatus(t.ticket_id)} /></td>
                           </tr>
                         ))}

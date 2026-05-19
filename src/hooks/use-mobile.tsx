@@ -1,19 +1,28 @@
 import * as React from "react"
-
-const MOBILE_BREAKPOINT = 768
+import { MOBILE_BREAKPOINT } from "@/lib/constants"
 
 export function useIsMobile() {
-  const [isMobile, setIsMobile] = React.useState<boolean | undefined>(undefined)
+  // 1. Initialize state directly to prevent a double-render flash on mount
+  const [isMobile, setIsMobile] = React.useState<boolean>(() => {
+    if (typeof window === "undefined") return false
+    return window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`).matches
+  })
 
   React.useEffect(() => {
     const mql = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`)
-    const onChange = () => {
-      setIsMobile(window.innerWidth < MOBILE_BREAKPOINT)
+    
+    // 2. Read directly from the event match property instead of checking window.innerWidth
+    const onChange = (e: MediaQueryListEvent) => {
+      setIsMobile(e.matches)
     }
+    
     mql.addEventListener("change", onChange)
-    setIsMobile(window.innerWidth < MOBILE_BREAKPOINT)
+    
+    // Sync initial state accurately
+    setIsMobile(mql.matches)
+    
     return () => mql.removeEventListener("change", onChange)
   }, [])
 
-  return !!isMobile
+  return isMobile
 }
