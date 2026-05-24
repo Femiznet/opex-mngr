@@ -15,7 +15,7 @@ export const STATUS = {
 } as const;
 
 /* Currency & Formatting */
-export const CURRENCY_SYMBOL = "$";
+export const CURRENCY_SYMBOL = "₦";
 
 /* Image Upload Configuration */
 export const IMAGE_BUCKET = "ticket-attachments";

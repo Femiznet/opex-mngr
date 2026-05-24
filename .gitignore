@@ -27,12 +27,6 @@ dist-ssr
 .env.*.local
 !.env.example
 
-# Supabase Local Development Caches
-supabase/
-
-# Local data
-data/
-
 # Wrangler / Cloudflare
 .wrangler/
 .dev.vars
@@ -106,3 +100,10 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+
+# Supabase Local Development Caches
+supabase/.temp/
+supabase/.branches/
+
+# Local data
+data/
