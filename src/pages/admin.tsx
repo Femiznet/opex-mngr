@@ -16,9 +16,8 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Textarea } from "@/components/ui/textarea";
 import { Search, ChevronDown, Paperclip, AlertTriangle, X, Download } from "lucide-react";
-import { format } from "date-fns";
+import { format, getISOWeek } from "date-fns";
 import { useSubmissionItems, useSubmissionVersions, Submission } from "@/hooks/use-submissions";
-import * as XLSX from "xlsx";
 import { toast } from "sonner";
 
 export default function Admin() {
@@ -58,76 +57,297 @@ export default function Admin() {
     }
     setExporting(true);
     try {
-      const exportable = submissions.filter(s => s.status === STATUS.SUBMITTED || s.status === STATUS.VERIFIED);
+      const exportable = submissions.filter(
+        s => s.status === STATUS.SUBMITTED || s.status === STATUS.VERIFIED
+      );
       if (exportable.length === 0) {
         toast.error("No submitted or verified records to export.");
         setExporting(false);
         return;
       }
-
-      // Pull all items in one query
+  
       const ids = exportable.map(s => s.id);
       const { data: allItems, error } = await supabase
         .from('submission_items')
         .select('*')
         .in('submission_id', ids);
       if (error) throw error;
-
+  
       const ticketByTid = new Map(tickets.map(t => [t.ticket_id, t]));
       const materialById = new Map(materials.map(m => [m.id, m]));
-
-      // Build flat rows: ticket header row + material rows beneath
-      const rows: (string | number)[][] = [];
-      rows.push([
-        "TICKET NUMBER", "DESCRIPTION", "CATEGORY",
-        "material name", "quantity", "unit price", "total price",
-        "quantity left", "total value left", "date submitted", "image attachment"
-      ]);
-
+   
+      // Group submissions by category, then by ISO week number
+      const byCategory = new Map<string, Map<number, typeof exportable>>();
       for (const sub of exportable) {
         const ticket = ticketByTid.get(sub.ticket_id);
-        // Ticket header row
-        rows.push([
-          sub.ticket_id,
-          ticket?.subject ?? "",
-          ticket?.request_category ?? "",
-          "", "", "", "", "", "", "", ""
-        ]);
-        const items = (allItems ?? []).filter(i => i.submission_id === sub.id);
-        const submittedAt = format(new Date(sub.updated_at), 'yyyy-MM-dd HH:mm');
-        const imageAttached = (sub as any).image_attached
-          ? JSON.stringify({ attached: true })
-          : JSON.stringify({ image: [] });
-        for (const it of items) {
-          const mat = it.material_id != null ? materialById.get(it.material_id) : null;
-          const quantityLeft = mat ? Math.max(0, Number(mat.qty_available) - Number(it.quantity)) : "";
-          const totalValueLeft = mat && typeof quantityLeft === "number"
-            ? Number((quantityLeft * Number(it.unit_price)).toFixed(2))
-            : "";
-          rows.push([
-            "", "", "",
-            it.name,
-            Number(it.quantity),
-            Number(it.unit_price),
-            Number(it.total_price),
-            quantityLeft,
-            totalValueLeft,
-            submittedAt,
-            imageAttached
-          ]);
+        const category = ticket?.request_category ?? "UNCATEGORISED";
+        const weekNum = getISOWeek(new Date(sub.updated_at)); // use your date-fns getISOWeek
+  
+        if (!byCategory.has(category)) byCategory.set(category, new Map());
+        const weekMap = byCategory.get(category)!;
+        if (!weekMap.has(weekNum)) weekMap.set(weekNum, []);
+        weekMap.get(weekNum)!.push(sub);
+      }
+  
+      const ExcelJS = (await import('exceljs')).default;
+      const wb = new ExcelJS.Workbook();
+  
+      // Colours
+      const BLUE_FILL   = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF00B0F0' } } as const;
+      const YELLOW_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFF00' } } as const;
+      const RED_FILL    = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFF0000' } } as const;
+      const GREY_FILL   = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9D9D9' } } as const;
+  
+      const boldFont   = { bold: true, name: 'Arial', size: 10 };
+      const normalFont = { bold: false, name: 'Arial', size: 10 };
+      const centerAlign = { horizontal: 'center', vertical: 'middle', wrapText: true } as const;
+      const leftAlign   = { horizontal: 'left',   vertical: 'middle', wrapText: true } as const;
+  
+      const thin = { style: 'thin', color: { argb: 'FF000000' } } as const;
+      const allBorders = { top: thin, left: thin, bottom: thin, right: thin };
+  
+      // Columns: B=SN, C=TicketNo, D=JC Date, E=Material, F=UOM, G=Qty, H=Rate, I=Total, J=Remarks, K=TotalCost, L=Image
+      const COL = { SN: 2, TICKET: 3, JC: 4, MAT: 5, UOM: 6, QTY: 7, RATE: 8, TOTAL: 9, REMARKS: 10, TOTALCOST: 11, IMAGE: 12 };
+  
+      for (const [category, weekMap] of byCategory) {
+        const ws = wb.addWorksheet(category.toUpperCase());
+  
+        ws.columns = [
+          { width: 4  },  // A - spacer
+          { width: 6  },  // B - S/N
+          { width: 14 },  // C - Ticket No
+          { width: 14 },  // D - J-C Date
+          { width: 30 },  // E - Material
+          { width: 8  },  // F - UOM
+          { width: 8  },  // G - Qty
+          { width: 12 },  // H - Rate
+          { width: 12 },  // I - Total
+          { width: 20 },  // J - Remarks
+          { width: 14 },  // K - Total Cost
+          { width: 28 },  // L - Image Attachment
+        ];
+  
+        let rowIdx = 1;
+  
+        const sortedWeeks = [...weekMap.keys()].sort((a, b) => a - b);
+  
+        for (const weekNum of sortedWeeks) {
+          const weekSubs = weekMap.get(weekNum)!;
+  
+          // ── WEEK HEADER ROW ──────────────────────────────────────────
+          const weekRow = ws.getRow(rowIdx);
+          weekRow.height = 20;
+  
+          const snCell = weekRow.getCell(COL.SN);
+          snCell.value = 'S/NO';
+          snCell.font = boldFont;
+          snCell.fill = GREY_FILL;
+          snCell.alignment = centerAlign;
+          snCell.border = allBorders;
+  
+          const ticketCell = weekRow.getCell(COL.TICKET);
+          ticketCell.value = 'TICKET NO';
+          ticketCell.font = boldFont;
+          ticketCell.fill = GREY_FILL;
+          ticketCell.alignment = centerAlign;
+          ticketCell.border = allBorders;
+  
+          const weekCell = weekRow.getCell(COL.JC);
+          weekCell.value = `WEEK ${weekNum}`;
+          weekCell.font = boldFont;
+          weekCell.fill = GREY_FILL;
+          weekCell.alignment = centerAlign;
+          weekCell.border = allBorders;
+          ws.mergeCells(rowIdx, COL.JC, rowIdx, COL.REMARKS);
+  
+          const imgHeaderCell = weekRow.getCell(COL.IMAGE);
+          imgHeaderCell.value = 'DOCUMENT ATTACHMENT';
+          imgHeaderCell.font = { ...boldFont, color: { argb: 'FFFFFFFF' } };
+          imgHeaderCell.fill = RED_FILL;
+          imgHeaderCell.alignment = centerAlign;
+          imgHeaderCell.border = allBorders;
+  
+          rowIdx++;
+  
+          // ── TICKET BLOCKS ─────────────────────────────────────────────
+          let snCounter = 1;
+          for (const sub of weekSubs) {
+            const ticket = ticketByTid.get(sub.ticket_id);
+            const items = (allItems ?? []).filter(i => i.submission_id === sub.id);
+            const blockSize = Math.max(items.length, 1);
+  
+            const jcDate = ticket?.closed_time
+              ? format(new Date(ticket.closed_time), 'dd/MM/yyyy')
+              : '';
+  
+            // Subject line row
+            const subjRow = ws.getRow(rowIdx);
+            subjRow.height = 18;
+            const subjCell = subjRow.getCell(COL.JC);
+            subjCell.value = `${ticket?.subject ?? ''} (Ticket Number: ${sub.ticket_id})`;
+            subjCell.font = { ...boldFont, color: { argb: 'FF000000' } };
+            subjCell.fill = BLUE_FILL;
+            subjCell.alignment = leftAlign;
+            subjCell.border = allBorders;
+            ws.mergeCells(rowIdx, COL.JC, rowIdx, COL.REMARKS);
+  
+            const tcLabelCell = subjRow.getCell(COL.TOTALCOST);
+            tcLabelCell.value = 'TOTAL COST';
+            tcLabelCell.font = boldFont;
+            tcLabelCell.alignment = centerAlign;
+            tcLabelCell.border = allBorders;
+  
+            rowIdx++;
+  
+            // Column header row
+            const hdrRow = ws.getRow(rowIdx);
+            hdrRow.height = 16;
+            const headers: [number, string][] = [
+              [COL.JC, 'J-C DATE'], [COL.MAT, 'MATERIAL USED'], [COL.UOM, 'UOM'],
+              [COL.QTY, 'QTY'], [COL.RATE, 'RATE'], [COL.TOTAL, 'TOTAL'], [COL.REMARKS, 'REMARKS'],
+            ];
+            for (const [col, label] of headers) {
+              const c = hdrRow.getCell(col);
+              c.value = label;
+              c.font = boldFont;
+              c.fill = YELLOW_FILL;
+              c.alignment = centerAlign;
+              c.border = allBorders;
+            }
+            rowIdx++;
+  
+            // Material rows
+            const matStartRow = rowIdx;
+            let blockTotal = 0;
+  
+            for (let i = 0; i < items.length; i++) {
+              const it = items[i];
+              const mat = it.material_id != null ? materialById.get(it.material_id) : null;
+              const lineTotal = Number(it.total_price);
+              blockTotal += lineTotal;
+  
+              const matRow = ws.getRow(rowIdx);
+              matRow.height = 15;
+  
+              const setCell = (col: number, val: any, fmt?: string) => {
+                const c = matRow.getCell(col);
+                c.value = val;
+                c.font = normalFont;
+                c.alignment = col === COL.MAT ? leftAlign : centerAlign;
+                c.border = allBorders;
+                if (fmt) c.numFmt = fmt;
+              };
+  
+              setCell(COL.MAT, it.name);
+              setCell(COL.UOM, '');
+              setCell(COL.QTY, Number(it.quantity));
+              setCell(COL.RATE, Number(it.unit_price), '#,##0.00');
+              setCell(COL.TOTAL, lineTotal, '#,##0.00');
+  
+              rowIdx++;
+            }
+  
+            // Total row
+            const totalRow = ws.getRow(rowIdx);
+            totalRow.height = 15;
+            const totalLabelCell = totalRow.getCell(COL.RATE);
+            totalLabelCell.value = 'TOTAL';
+            totalLabelCell.font = boldFont;
+            totalLabelCell.alignment = centerAlign;
+            totalLabelCell.border = allBorders;
+  
+            const totalValCell = totalRow.getCell(COL.TOTAL);
+            totalValCell.value = blockTotal;
+            totalValCell.font = boldFont;
+            totalValCell.numFmt = '#,##0.00';
+            totalValCell.alignment = centerAlign;
+            totalValCell.border = allBorders;
+  
+            const tcValCell = totalRow.getCell(COL.TOTALCOST);
+            tcValCell.value = blockTotal;
+            tcValCell.font = boldFont;
+            tcValCell.numFmt = '#,##0.00';
+            tcValCell.alignment = centerAlign;
+            tcValCell.border = allBorders;
+  
+            rowIdx++;
+  
+            // ── Merge S/N, Ticket No, J-C Date vertically across block ──
+            const mergeStart = matStartRow - 1; // from header row
+            const mergeEnd   = rowIdx - 1;      // up to and including total row
+  
+            // S/N — merged from subject row to total row
+            ws.mergeCells(mergeStart - 1, COL.SN, mergeEnd, COL.SN);
+            const snMergedCell = ws.getCell(mergeStart - 1, COL.SN);
+            snMergedCell.value = snCounter++;
+            snMergedCell.font = boldFont;
+            snMergedCell.alignment = centerAlign;
+            snMergedCell.border = allBorders;
+  
+            ws.mergeCells(matStartRow, COL.TICKET, mergeEnd, COL.TICKET);
+            const ticketMergedCell = ws.getCell(matStartRow, COL.TICKET);
+            ticketMergedCell.value = sub.ticket_id;
+            ticketMergedCell.font = normalFont;
+            ticketMergedCell.alignment = centerAlign;
+            ticketMergedCell.border = allBorders;
+  
+            ws.mergeCells(matStartRow, COL.JC, mergeEnd, COL.JC);
+            const jcMergedCell = ws.getCell(matStartRow, COL.JC);
+            jcMergedCell.value = jcDate;
+            jcMergedCell.font = normalFont;
+            jcMergedCell.alignment = centerAlign;
+            jcMergedCell.border = allBorders;
+  
+            // ── Image ─────────────────────────────────────────────────────
+            const imgMergeStart = mergeStart - 1;
+            const imgMergeEnd   = mergeEnd;
+            ws.mergeCells(imgMergeStart, COL.IMAGE, imgMergeEnd, COL.IMAGE);
+  
+            if (sub.image_attached && sub.image_url) {
+              try {
+                const resp = await fetch(sub.image_url);
+                const arrayBuf = await resp.arrayBuffer();
+                const ext = sub.image_url.split('.').pop()?.toLowerCase() ?? 'jpeg';
+                const mimeMap: Record<string, 'jpeg'|'png'|'gif'> = {
+                  jpg: 'jpeg', jpeg: 'jpeg', png: 'png', gif: 'gif',
+                };
+                const imgType = mimeMap[ext] ?? 'jpeg';
+  
+                const imageId = wb.addImage({
+                  buffer: arrayBuf,
+                  extension: imgType,
+                });
+  
+                // Calculate row positions for image placement
+                ws.addImage(imageId, {
+                  tl: { col: COL.IMAGE - 1, row: imgMergeStart - 1 } as any,
+                  br: { col: COL.IMAGE,     row: imgMergeEnd } as any,
+                  editAs: 'oneCell',
+                });
+              } catch {
+                ws.getCell(imgMergeStart, COL.IMAGE).value = 'Image unavailable';
+              }
+            }
+  
+            rowIdx++; // spacer between ticket blocks
+          }
+  
+          rowIdx++; // spacer between weeks
         }
       }
-
-      const ws = XLSX.utils.aoa_to_sheet(rows);
-      ws['!cols'] = [
-        { wch: 16 }, { wch: 36 }, { wch: 18 },
-        { wch: 28 }, { wch: 10 }, { wch: 12 }, { wch: 12 },
-        { wch: 14 }, { wch: 16 }, { wch: 18 }, { wch: 22 },
-      ];
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "Submissions");
-      const stamp = format(new Date(), 'yyyyMMdd-HHmm');
-      XLSX.writeFile(wb, `opex-submissions-${stamp}.xlsx`);
+  
+      // ── Write file in browser ─────────────────────────────────────────
+      const buffer = await wb.xlsx.writeBuffer();
+      const blob = new Blob([buffer], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `opex-submissions-${format(new Date(), 'yyyyMMdd-HHmm')}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+  
       toast.success(`Exported ${exportable.length} submission(s).`);
     } catch (e: any) {
       console.error(e);
